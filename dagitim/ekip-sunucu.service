@@ -1,0 +1,19 @@
+# Ekip sunucusunu Linux'ta arka planda sürekli çalıştırır; çökerse ya da makine yeniden başlarsa kendiliğinden açılır.
+# Kurulum: sunucu-kur.sh bunu /etc/systemd/system/ altına kopyalar.
+
+[Unit]
+Description=Ekip sunucusu
+After=network.target
+
+[Service]
+User=ekip
+WorkingDirectory=/opt/ekip
+ExecStart=/opt/ekip/Ekip.Sunucu
+Environment=VeritabaniYolu=/var/lib/ekip/ekip.db
+Environment=Urls=http://localhost:5080
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

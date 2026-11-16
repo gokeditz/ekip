@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Ekip.Ortak/Ekip.Ortak.csproj" />
+  <Project Path="Ekip.Sunucu/Ekip.Sunucu.csproj" />
+  <Project Path="Ekip.Uygulama/Ekip.Uygulama.csproj" />
+</Solution>

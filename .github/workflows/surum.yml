@@ -1,0 +1,47 @@
+# Yeni sürüm: "v1.0.0" gibi bir etiket gönderince (git tag v1.0.0 && git push --tags)
+# GitHub uygulamayı Windows için, sunucuyu Linux için derler ve bir "Release" oluşturup dosyaları ekler.
+# Otomatik güncelleme (sonraki adım) bu Release'leri kontrol edecek.
+name: Sürüm
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  derle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sürüm numarası
+        id: surum
+        shell: pwsh
+        run: '"no=$("${{ github.ref_name }}".TrimStart("v"))" >> $env:GITHUB_OUTPUT'
+
+      - name: Uygulama (Windows, tek exe, .NET kurulumu gerekmez)
+        shell: pwsh
+        run: |
+          dotnet publish Ekip.Uygulama -c Release -r win-x64 --self-contained `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
+            -p:Version=${{ steps.surum.outputs.no }} -o yayin/uygulama
+          Compress-Archive -Path yayin/uygulama/* -DestinationPath Ekip-Windows.zip
+
+      - name: Sunucu (Linux ARM64, Oracle için)
+        shell: pwsh
+        run: |
+          dotnet publish Ekip.Sunucu -c Release -r linux-arm64 --self-contained -p:PublishSingleFile=true `
+            -p:Version=${{ steps.surum.outputs.no }} -o yayin/sunucu
+          Compress-Archive -Path yayin/sunucu/* -DestinationPath Ekip-Sunucu-linux-arm64.zip
+
+      - name: Release oluştur
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" Ekip-Windows.zip Ekip-Sunucu-linux-arm64.zip --title "Ekip ${{ github.ref_name }}" --generate-notes
