@@ -1,13 +1,15 @@
 ﻿# Otomatik güncelleme paketi hazırlar:
 #   yayin/guncelleme/Ekip-<sürüm>.zip  -> uygulamanın kendisi (tek exe)
 #   yayin/guncelleme/son.json          -> { surum, indir, sha256, notlar }
-# Bu iki dosya aynı klasöre (Cloudflare R2 vb.) yüklenince uygulamalar yeni sürümü kendileri bulur.
+# Bu iki dosya GitHub Release'ine eklenince (surum.yml yapar) uygulamalar yeni sürümü kendileri bulur.
 #
 # Kullanım:  powershell -File dagitim/guncelleme-paketle.ps1 -Surum 1.0.1 -Notlar "Mini sohbet düzeltmeleri"
 # GitHub Actions da (surum.yml) aynı betiği kullanır.
 param(
     [Parameter(Mandatory = $true)][string]$Surum,
     [string]$Notlar = "",
+    # Zip'in indirileceği klasör adresi (ör. GitHub Release'i). Boşsa son.json'un yanında aranır.
+    [string]$IndirmeTabani = "",
     [string]$Cikti = "yayin/guncelleme"
 )
 $ErrorActionPreference = "Stop"
@@ -31,7 +33,8 @@ $zip = Join-Path $cikti $zipAdi
 [IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
 $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 
-$bilgi = [ordered]@{ surum = $Surum; indir = $zipAdi; sha256 = $sha; notlar = $Notlar }
+$indir = if ($IndirmeTabani) { $IndirmeTabani.TrimEnd('/') + "/" + $zipAdi } else { $zipAdi }
+$bilgi = [ordered]@{ surum = $Surum; indir = $indir; sha256 = $sha; notlar = $Notlar }
 [IO.File]::WriteAllText((Join-Path $cikti "son.json"), ($bilgi | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 Remove-Item -LiteralPath $dosyalar -Recurse -Force
 

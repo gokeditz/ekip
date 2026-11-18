@@ -1,12 +1,10 @@
 # Yeni sürüm: "v1.0.1" gibi bir etiket gönderince (git tag v1.0.1 && git push origin v1.0.1)
 #  1) Uygulama Windows için tek exe olarak derlenir, sunucu Linux (Oracle) için derlenir.
-#  2) GitHub'da bir "Release" oluşturulur (ilk kurulum için Ekip-Windows.zip buradan indirilir).
-#  3) Cloudflare R2 ayarlıysa güncelleme paketi + son.json R2'ye yüklenir; açık olan tüm Ekip'ler
-#     30 dakika içinde (ya da bir sonraki açılışta) yeni sürümü görüp güncellemeyi sorar.
-#
-# R2 için repo ayarlarında (Settings > Secrets and variables > Actions) şu gizli değerler olmalı:
-#   R2_HESAP_ID, R2_ERISIM_ANAHTARI, R2_GIZLI_ANAHTAR, R2_KOVA   — bkz. KURULUM.md
-# Yoksa 3. adım atlanır, gerisi yine çalışır.
+#  2) GitHub'da bir "Release" oluşturulur. İçinde:
+#       Ekip-Windows.zip          -> ilk kurulum (arkadaşlara bu link verilir)
+#       Ekip-<sürüm>.zip + son.json -> otomatik güncelleme; açık olan tüm Ekip'ler 30 dakika içinde
+#                                    (ya da bir sonraki açılışta) yeni sürümü görüp güncellemeyi sorar
+#       Ekip-Sunucu-linux-arm64.zip -> Oracle sunucusu
 name: Sürüm
 
 on:
@@ -19,11 +17,6 @@ permissions:
 jobs:
   derle:
     runs-on: windows-latest
-    env:
-      R2_HESAP_ID: ${{ secrets.R2_HESAP_ID }}
-      R2_ERISIM_ANAHTARI: ${{ secrets.R2_ERISIM_ANAHTARI }}
-      R2_GIZLI_ANAHTAR: ${{ secrets.R2_GIZLI_ANAHTAR }}
-      R2_KOVA: ${{ secrets.R2_KOVA }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +39,8 @@ jobs:
         env:
           GUNCELLEME_NOTU: ${{ steps.surum.outputs.not }} # Betiğe ortam değişkeniyle: tırnak vb. karakterler komutu bozmasın.
         run: |
-          ./dagitim/guncelleme-paketle.ps1 -Surum "${{ steps.surum.outputs.no }}" -Notlar $env:GUNCELLEME_NOTU -Cikti yayin/guncelleme
+          ./dagitim/guncelleme-paketle.ps1 -Surum "${{ steps.surum.outputs.no }}" -Notlar $env:GUNCELLEME_NOTU -Cikti yayin/guncelleme `
+            -IndirmeTabani "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
           Copy-Item "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" Ekip-Windows.zip
 
       - name: Sunucu (Linux ARM64, Oracle için)
@@ -60,25 +54,6 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" Ekip-Windows.zip Ekip-Sunucu-linux-arm64.zip --title "Ekip ${{ github.ref_name }}" --generate-notes
-
-      - name: Güncellemeyi Cloudflare R2'ye yükle
-        if: env.R2_ERISIM_ANAHTARI != ''
-        shell: pwsh
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ERISIM_ANAHTARI }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_GIZLI_ANAHTAR }}
-          AWS_DEFAULT_REGION: auto
-          # R2, aws CLI'ın yeni varsayılan sağlama toplamı başlıklarını desteklemiyor.
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
-          $ErrorActionPreference = "Stop"
-          $uc = "https://$env:R2_HESAP_ID.r2.cloudflarestorage.com"
-          $zip = "Ekip-${{ steps.surum.outputs.no }}.zip"
-          # Önce zip, sonra son.json: uygulamalar hiçbir zaman olmayan bir dosyayı görmesin.
-          aws s3 cp "yayin/guncelleme/$zip" "s3://$env:R2_KOVA/$zip" --endpoint-url $uc --content-type application/zip
-          if ($LASTEXITCODE -ne 0) { throw "zip yüklenemedi" }
-          aws s3 cp yayin/guncelleme/son.json "s3://$env:R2_KOVA/son.json" --endpoint-url $uc `
-            --content-type "application/json; charset=utf-8" --cache-control "no-cache"
-          if ($LASTEXITCODE -ne 0) { throw "son.json yüklenemedi" }
+          gh release create "${{ github.ref_name }}" --title "Ekip ${{ github.ref_name }}" --generate-notes `
+            Ekip-Windows.zip "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" yayin/guncelleme/son.json Ekip-Sunucu-linux-arm64.zip

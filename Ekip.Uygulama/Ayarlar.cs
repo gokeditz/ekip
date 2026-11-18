@@ -13,8 +13,9 @@ public class Ayarlar
     public const string VarsayilanSunucu = "http://localhost:5080";
 
     // Otomatik güncelleme: son sürüm bilgisinin (son.json) adresi. Boşsa güncelleme kontrolü yapılmaz.
-    // Cloudflare R2 açılınca ör. "https://pub-xxxx.r2.dev/son.json" olacak. Test için "--guncelleme <adres>" ile de verilebilir.
-    public const string VarsayilanGuncellemeAdresi = "";
+    // GitHub'daki en son Release'in son.json dosyası (surum.yml her sürümde ekler).
+    // Test için "--guncelleme <adres>" ile başka adres verilebilir.
+    public const string VarsayilanGuncellemeAdresi = "https://github.com/gokeditz/ekip/releases/latest/download/son.json";
     public static string GuncellemeAdresi { get; set; } = VarsayilanGuncellemeAdresi;
 
     public string SunucuAdresi { get; set; } = VarsayilanSunucu;
