@@ -12,6 +12,11 @@ public class Ayarlar
     // Böylece kimse "Sunucu ayarı"na girmek zorunda kalmaz. Bkz. KURULUM.md.
     public const string VarsayilanSunucu = "http://localhost:5080";
 
+    // Otomatik güncelleme: son sürüm bilgisinin (son.json) adresi. Boşsa güncelleme kontrolü yapılmaz.
+    // Cloudflare R2 açılınca ör. "https://pub-xxxx.r2.dev/son.json" olacak. Test için "--guncelleme <adres>" ile de verilebilir.
+    public const string VarsayilanGuncellemeAdresi = "";
+    public static string GuncellemeAdresi { get; set; } = VarsayilanGuncellemeAdresi;
+
     public string SunucuAdresi { get; set; } = VarsayilanSunucu;
     public string? SonKullaniciAdi { get; set; }
     public string? SifreliToken { get; set; }

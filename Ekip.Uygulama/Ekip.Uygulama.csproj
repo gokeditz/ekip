@@ -21,6 +21,8 @@
     <!-- Form tasarımcısı kullanmıyoruz, her şey kodda. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
     <ApplicationIcon>Varliklar\ekip.ico</ApplicationIcon>
+    <!-- Sürüm: yayınlarken -p:Version=1.2.3 ile verilir; otomatik güncelleme bunu karşılaştırır. -->
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
 </Project>

@@ -140,6 +140,7 @@ public partial class AnaForm : TemaliForm
         _bagli = true; // İlk bağlantı denenirken "koptu" bandı yanıp sönmesin.
         _ = AdminMiKontrol();
         _ = _canli.Baslat();
+        GuncellemeyiBaslat();
         await Yenile();
     }
 
@@ -160,6 +161,7 @@ public partial class AnaForm : TemaliForm
             PartiTemizle();
             _bantZamanlayici.Dispose();
             _yaziyorZamanlayici.Dispose();
+            _guncellemeZamanlayici.Dispose();
             _ = _canli.DisposeAsync().AsTask();
         }
         base.Dispose(disposing);

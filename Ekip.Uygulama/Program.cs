@@ -7,6 +7,9 @@ static class Program
     {
         int i = Array.IndexOf(args, "--profil");
         if (i >= 0 && i + 1 < args.Length && args[i + 1].All(char.IsLetterOrDigit)) Ayarlar.ProfilAdi = args[i + 1];
+        int g = Array.IndexOf(args, "--guncelleme");
+        if (g >= 0 && g + 1 < args.Length && Uri.IsWellFormedUriString(args[g + 1], UriKind.Absolute)) Ayarlar.GuncellemeAdresi = args[g + 1];
+        Guncelleyici.EskileriTemizle();
 
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();

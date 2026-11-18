@@ -33,9 +33,44 @@ GitHub (özel depo)
    GitHub birkaç dakika içinde `Ekip-Windows.zip` ve `Ekip-Sunucu-linux-arm64.zip` dosyalarını
    **Releases** sayfasına koyar (`.github/workflows/surum.yml`).
 
-> Depo özel olunca Releases da özeldir. Arkadaşların indirebilsin ve otomatik güncelleme
-> çalışsın diye, uygulamayı dağıtacağın zaman ya depoyu açık yaparsın ya da Release dosyalarını
-> başka bir yere koyarız (otomatik güncelleme adımında karar veririz).
+> Depo özel olduğu için Releases da özeldir; arkadaşların oradan indiremez. Bu yüzden
+> güncelleme dosyaları Cloudflare R2'ye de yüklenir (bkz. 1b). Kod gizli kalır.
+
+## 1b. Otomatik güncelleme: Cloudflare R2 (bedava)
+
+R2, dosya barındırma servisi; ayda 10 GB depolama ve sınırsız indirme bedava. Uygulama açıkken
+30 dakikada bir (ve her açılışta) R2'deki `son.json`'a bakar, yeni sürüm varsa uygulama içinde
+"Yeni sürüm hazır" diye sorar; "Şimdi güncelle" deyince indirir, doğrular ve kendini yeniden açar.
+
+Bir kez yapılacaklar:
+1. Cloudflare panelinde **R2 Object Storage**'a gir ve R2'yi etkinleştir (kart isteyebilir,
+   bedava sınırda ücret çekilmez).
+2. Kova (bucket) oluştur: ad `ekip-guncelleme`.
+3. Kova → **Settings → Public access → R2.dev subdomain → Allow**. Çıkan adresi not al
+   (ör. `https://pub-xxxx.r2.dev`).
+4. R2 ana sayfası → **Manage API tokens → Create API token**: izin *Object Read & Write*, sadece
+   `ekip-guncelleme` kovası. Çıkan **Access Key ID** ve **Secret Access Key**'i kopyala
+   (bir daha gösterilmez).
+5. GitHub'da depo → **Settings → Secrets and variables → Actions → New repository secret**:
+
+   | Ad | Değer |
+   |---|---|
+   | `R2_HESAP_ID` | Cloudflare hesap kimliği (R2 sayfasının sağında "Account ID") |
+   | `R2_ERISIM_ANAHTARI` | Access Key ID |
+   | `R2_GIZLI_ANAHTAR` | Secret Access Key |
+   | `R2_KOVA` | `ekip-guncelleme` |
+
+6. `Ekip.Uygulama\Ayarlar.cs` içindeki `VarsayilanGuncellemeAdresi` değerini
+   `https://pub-xxxx.r2.dev/son.json` yap.
+
+Bundan sonra her sürüm etiketi (`git tag v1.0.1 && git push origin v1.0.1`) güncellemeyi
+otomatik R2'ye yükler. Güncelleme notu olarak etiketlenen commit'in başlığı gösterilir.
+
+Elle paket hazırlamak istersen (R2'ye kendin yüklersin):
+```
+powershell -ExecutionPolicy Bypass -File dagitim\guncelleme-paketle.ps1 -Surum 1.0.1 -Notlar "Neler değişti"
+```
+`yayin\guncelleme\` içine `Ekip-1.0.1.zip` ve `son.json` çıkar; önce zip'i, sonra son.json'u yükle.
 
 ---
 
@@ -93,10 +128,14 @@ sudo -u ekip VeritabaniYolu=/var/lib/ekip/ekip.db /opt/ekip/Ekip.Sunucu --AdminY
 
 ## 6. Arkadaşlara dağıtım
 
-1. `Ekip.Uygulama\Ayarlar.cs` içindeki `VarsayilanSunucu` değerini `https://ekip.duckdns.org` yap.
-2. Yeni sürüm etiketi at (`git tag v1.0.0 && git push --tags`).
-3. Release'deki `Ekip-Windows.zip`'i arkadaşlarına gönder; açıp `Ekip.Uygulama.exe`'yi çalıştırsınlar.
-   .NET kurmalarına gerek yok (her şey exe'nin içinde).
+1. `Ekip.Uygulama\Ayarlar.cs` içindeki `VarsayilanSunucu` değerini `https://ekip.duckdns.org`,
+   `VarsayilanGuncellemeAdresi` değerini R2 adresin yap (bkz. 1b).
+2. Yeni sürüm etiketi at (`git tag v1.0.0 && git push origin v1.0.0`).
+3. Arkadaşlarına R2'deki zip'in linkini gönder (ör. `https://pub-xxxx.r2.dev/Ekip-1.0.0.zip`);
+   zip'i bir klasöre açıp `Ekip.Uygulama.exe`'yi çalıştırsınlar. .NET kurmalarına gerek yok.
+   Bundan sonraki sürümler kendiliğinden gelir.
+   (Masaüstü/Program Files yerine kendi klasörlerine, ör. `Belgeler\Ekip`, açsınlar: güncelleme
+   exe'nin yanına yazabilmeli.)
 
 ## 7. Bakım
 

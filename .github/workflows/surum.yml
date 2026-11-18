@@ -1,6 +1,12 @@
-# Yeni sürüm: "v1.0.0" gibi bir etiket gönderince (git tag v1.0.0 && git push --tags)
-# GitHub uygulamayı Windows için, sunucuyu Linux için derler ve bir "Release" oluşturup dosyaları ekler.
-# Otomatik güncelleme (sonraki adım) bu Release'leri kontrol edecek.
+# Yeni sürüm: "v1.0.1" gibi bir etiket gönderince (git tag v1.0.1 && git push origin v1.0.1)
+#  1) Uygulama Windows için tek exe olarak derlenir, sunucu Linux (Oracle) için derlenir.
+#  2) GitHub'da bir "Release" oluşturulur (ilk kurulum için Ekip-Windows.zip buradan indirilir).
+#  3) Cloudflare R2 ayarlıysa güncelleme paketi + son.json R2'ye yüklenir; açık olan tüm Ekip'ler
+#     30 dakika içinde (ya da bir sonraki açılışta) yeni sürümü görüp güncellemeyi sorar.
+#
+# R2 için repo ayarlarında (Settings > Secrets and variables > Actions) şu gizli değerler olmalı:
+#   R2_HESAP_ID, R2_ERISIM_ANAHTARI, R2_GIZLI_ANAHTAR, R2_KOVA   — bkz. KURULUM.md
+# Yoksa 3. adım atlanır, gerisi yine çalışır.
 name: Sürüm
 
 on:
@@ -13,6 +19,11 @@ permissions:
 jobs:
   derle:
     runs-on: windows-latest
+    env:
+      R2_HESAP_ID: ${{ secrets.R2_HESAP_ID }}
+      R2_ERISIM_ANAHTARI: ${{ secrets.R2_ERISIM_ANAHTARI }}
+      R2_GIZLI_ANAHTAR: ${{ secrets.R2_GIZLI_ANAHTAR }}
+      R2_KOVA: ${{ secrets.R2_KOVA }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,21 +34,26 @@ jobs:
       - name: Sürüm numarası
         id: surum
         shell: pwsh
-        run: '"no=$("${{ github.ref_name }}".TrimStart("v"))" >> $env:GITHUB_OUTPUT'
+        run: |
+          $no = "${{ github.ref_name }}".TrimStart("v")
+          "no=$no" >> $env:GITHUB_OUTPUT
+          # Güncelleme notu: etiketlenen commit'in başlığı.
+          $not = (git log -1 --format=%s).Trim()
+          "not=$not" >> $env:GITHUB_OUTPUT
 
       - name: Uygulama (Windows, tek exe, .NET kurulumu gerekmez)
         shell: pwsh
+        env:
+          GUNCELLEME_NOTU: ${{ steps.surum.outputs.not }} # Betiğe ortam değişkeniyle: tırnak vb. karakterler komutu bozmasın.
         run: |
-          dotnet publish Ekip.Uygulama -c Release -r win-x64 --self-contained `
-            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-            -p:Version=${{ steps.surum.outputs.no }} -o yayin/uygulama
-          Compress-Archive -Path yayin/uygulama/* -DestinationPath Ekip-Windows.zip
+          ./dagitim/guncelleme-paketle.ps1 -Surum "${{ steps.surum.outputs.no }}" -Notlar $env:GUNCELLEME_NOTU -Cikti yayin/guncelleme
+          Copy-Item "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" Ekip-Windows.zip
 
       - name: Sunucu (Linux ARM64, Oracle için)
         shell: pwsh
         run: |
           dotnet publish Ekip.Sunucu -c Release -r linux-arm64 --self-contained -p:PublishSingleFile=true `
-            -p:Version=${{ steps.surum.outputs.no }} -o yayin/sunucu
+            -p:DebugType=none -p:Version=${{ steps.surum.outputs.no }} -o yayin/sunucu
           Compress-Archive -Path yayin/sunucu/* -DestinationPath Ekip-Sunucu-linux-arm64.zip
 
       - name: Release oluştur
@@ -45,3 +61,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" Ekip-Windows.zip Ekip-Sunucu-linux-arm64.zip --title "Ekip ${{ github.ref_name }}" --generate-notes
+
+      - name: Güncellemeyi Cloudflare R2'ye yükle
+        if: env.R2_ERISIM_ANAHTARI != ''
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ERISIM_ANAHTARI }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_GIZLI_ANAHTAR }}
+          AWS_DEFAULT_REGION: auto
+          # R2, aws CLI'ın yeni varsayılan sağlama toplamı başlıklarını desteklemiyor.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          $ErrorActionPreference = "Stop"
+          $uc = "https://$env:R2_HESAP_ID.r2.cloudflarestorage.com"
+          $zip = "Ekip-${{ steps.surum.outputs.no }}.zip"
+          # Önce zip, sonra son.json: uygulamalar hiçbir zaman olmayan bir dosyayı görmesin.
+          aws s3 cp "yayin/guncelleme/$zip" "s3://$env:R2_KOVA/$zip" --endpoint-url $uc --content-type application/zip
+          if ($LASTEXITCODE -ne 0) { throw "zip yüklenemedi" }
+          aws s3 cp yayin/guncelleme/son.json "s3://$env:R2_KOVA/son.json" --endpoint-url $uc `
+            --content-type "application/json; charset=utf-8" --cache-control "no-cache"
+          if ($LASTEXITCODE -ne 0) { throw "son.json yüklenemedi" }

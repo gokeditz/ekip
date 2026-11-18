@@ -423,6 +423,7 @@ public partial class AnaForm
         Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Pencereler.OneGetir(Handle);
+        BekleyenGuncellemeyiSor();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
