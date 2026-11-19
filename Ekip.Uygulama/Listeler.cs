@@ -264,6 +264,57 @@ public class ProfilKarti : Control
     public Image? Resim { get => _resim; set { _resim = value; Invalidate(); } }
     public bool Cerceve { get; set; }
 
+    // "Kopyala" bağlantısı: kullanıcı numarasını (#12) panoya koyar; kısa süre "Kopyalandı" yazar.
+    private Rectangle _kopyaAlani;
+    private bool _kopyaUzerinde, _kopyalandi;
+    private System.Windows.Forms.Timer? _kopyaZamanlayici;
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        bool u = _profil != null && _kopyaAlani.Contains(e.Location);
+        if (u == _kopyaUzerinde) return;
+        _kopyaUzerinde = u;
+        Cursor = u ? Cursors.Hand : Cursors.Default;
+        Invalidate();
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (!_kopyaUzerinde) return;
+        _kopyaUzerinde = false;
+        Cursor = Cursors.Default;
+        Invalidate();
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.Button != MouseButtons.Left || _profil is null || !_kopyaAlani.Contains(e.Location)) return;
+        try { Clipboard.SetText("#" + _profil.Id); } catch { return; }
+        _kopyalandi = true;
+        Invalidate();
+        _kopyaZamanlayici ??= new System.Windows.Forms.Timer { Interval = 1600 };
+        _kopyaZamanlayici.Tick -= KopyaBitti;
+        _kopyaZamanlayici.Tick += KopyaBitti;
+        _kopyaZamanlayici.Stop();
+        _kopyaZamanlayici.Start();
+    }
+
+    private void KopyaBitti(object? s, EventArgs e)
+    {
+        _kopyaZamanlayici?.Stop();
+        _kopyalandi = false;
+        if (!IsDisposed) Invalidate();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _kopyaZamanlayici?.Dispose();
+        base.Dispose(disposing);
+    }
+
     private int BantH => Tema.S(84);
     private int AvatarCap => Tema.S(84);
     private int Ic => Tema.S(18);
@@ -317,7 +368,14 @@ public class ProfilKarti : Control
         y = bilgi.Y + Tema.S(12);
         TextRenderer.DrawText(g, p.GorunenAd, Tema.Yazi(14, kalin: true), new Rectangle(x, y, w, Tema.S(28)), Tema.Metin, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         y += Tema.S(28);
-        TextRenderer.DrawText(g, "@" + p.KullaniciAdi, Tema.Yazi(10), new Rectangle(x, y, w, Tema.S(20)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        // @kullaniciadi · #id  ve sağda küçük "Kopyala" (arkadaş eklerken #numara da kabul edilir).
+        _kopyaAlani = new Rectangle(x + w - Tema.S(84), y - Tema.S(1), Tema.S(84), Tema.S(22));
+        TextRenderer.DrawText(g, "@" + p.KullaniciAdi + "  ·  #" + p.Id, Tema.Yazi(10), new Rectangle(x, y, w - _kopyaAlani.Width - Tema.S(6), Tema.S(20)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        if (_kopyaUzerinde || _kopyalandi) Cizim.YuvarlakDoldur(g, _kopyaAlani, Tema.S(6), Tema.YuzeyUst);
+        var kopyaRenk = _kopyalandi ? Tema.Basari : _kopyaUzerinde ? Tema.Metin : Tema.MetinIkincil;
+        TextRenderer.DrawText(g, _kopyalandi ? Glif.Onay : Glif.Kopyala, Cizim.Ikon(9), new Rectangle(_kopyaAlani.X + Tema.S(8), _kopyaAlani.Y, Tema.S(18), _kopyaAlani.Height), kopyaRenk, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, _kopyalandi ? "Kopyalandı" : "Kopyala", Tema.Yazi(9, kalin: true), new Rectangle(_kopyaAlani.X + Tema.S(28), _kopyaAlani.Y, _kopyaAlani.Width - Tema.S(30), _kopyaAlani.Height), kopyaRenk,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         y += Tema.S(22);
         if (!string.IsNullOrWhiteSpace(p.DurumMesaji))
         {

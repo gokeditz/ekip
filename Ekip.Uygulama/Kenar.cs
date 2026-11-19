@@ -14,10 +14,43 @@ public class KenarCubugu : Control
     private readonly KoyuIpucu _ipucu = new();
 
     public AvatarOnbellek? Avatarlar { get; set; }
-    public Profil? Ben { get => _ben; set { _ben = value; Invalidate(); } }
+    public Profil? Ben { get => _ben; set { _ben = value; Invalidate(); BenDegisti?.Invoke(); } }
+    public event Action? BenDegisti;
     public int Bekleyen { get => _bekleyen; set { if (_bekleyen != value) { _bekleyen = value; Invalidate(); } } }
-    public List<SohbetOzeti> Sohbetler { get => _sohbetler; set { _sohbetler = value; _dmKaydirma = Math.Clamp(_dmKaydirma, 0, MaksKaydirma); Invalidate(); } }
+    public List<SohbetOzeti> Sohbetler { get => _sohbetler; set { _sohbetler = value; Birlestir(); SohbetlerDegisti?.Invoke(); } }
     public long? Secili { get => _secili; set { _secili = value; Invalidate(); } }
+
+    // ---- Gruplar: DM listesinin içinde, son mesaj zamanına göre karışık sıralanır ----
+    private sealed record Oge(SohbetOzeti? Dm, Grup? Grup);
+    private List<Grup> _gruplar = [];
+    private List<Oge> _ogeler = [];
+    private long? _seciliGrup;
+    private bool _secimYok;
+    public List<Grup> Gruplar { get => _gruplar; set { _gruplar = value ?? []; Birlestir(); } }
+    public long? SeciliGrup { get => _seciliGrup; set { if (_seciliGrup != value) { _seciliGrup = value; Invalidate(); } } }
+    // Keşfet gibi "Arkadaşlar"ın dışındaki bir sayfa açıkken hiçbir satır seçili görünmesin.
+    public bool SecimYok { get => _secimYok; set { if (_secimYok != value) { _secimYok = value; Invalidate(); } } }
+    public IkonOnbellek? Ikonlar { get; set; }
+    public event Action<long>? GrupTik;
+    public event Action? GrupEkleTik;
+    public event Action? SohbetlerDegisti;   // DM listesi (okunmamış sayıları dahil) değişti
+
+    // İki liste de kendi içinde sıralı gelir; sıralarını bozmadan zamana göre birleştirir (mesajsız olan en üstte).
+    private void Birlestir()
+    {
+        static long Anahtar(Mesaj? m) => m?.Zaman ?? long.MaxValue;
+        var gruplar = _gruplar.OrderByDescending(g => Anahtar(g.SonMesaj)).ToList();
+        var liste = new List<Oge>(_sohbetler.Count + gruplar.Count);
+        int d = 0, gi = 0;
+        while (d < _sohbetler.Count || gi < gruplar.Count)
+        {
+            if (gi >= gruplar.Count || (d < _sohbetler.Count && Anahtar(_sohbetler[d].SonMesaj) >= Anahtar(gruplar[gi].SonMesaj))) liste.Add(new Oge(_sohbetler[d++], null));
+            else liste.Add(new Oge(null, gruplar[gi++]));
+        }
+        _ogeler = liste;
+        _dmKaydirma = Math.Clamp(_dmKaydirma, 0, MaksKaydirma);
+        Invalidate();
+    }
     private PartiBilgisi? _parti;
     public PartiBilgisi? Parti { get => _parti; set { _parti = value; Invalidate(); } }
 
@@ -67,7 +100,8 @@ public class KenarCubugu : Control
         }
     }
     private int DmH => Tema.S(46);
-    private int MaksKaydirma => Math.Max(0, _sohbetler.Count * DmH - DmBolumu.Height);
+    private int MaksKaydirma => Math.Max(0, _ogeler.Count * DmH - DmBolumu.Height);
+    private Rectangle GrupEkleAlani => new(Width - Tema.S(10) - Tema.S(26), Tema.S(129) + Ek, Tema.S(26), Tema.S(26));
     private Rectangle DmAlani(int i) => new(Tema.S(10), DmBolumu.Y + i * DmH - _dmKaydirma, Width - Tema.S(20), DmH - Tema.S(2));
     private Rectangle KullaniciAlani => new(Tema.S(8), Height - AltH + Tema.S(8), Width - Tema.S(8) - Tema.S(52), AltH - Tema.S(16));
     private Rectangle AyarAlani => new(Width - Tema.S(48), Height - AltH + (AltH - Tema.S(36)) / 2, Tema.S(36), Tema.S(36));
@@ -85,7 +119,7 @@ public class KenarCubugu : Control
 
         // Arkadaşlar
         var oge = ArkadaslarAlani;
-        bool arkadaslarSecili = _secili is null && !_ayarlarAcik && !_yonetimAcik;
+        bool arkadaslarSecili = _secili is null && !_secimYok && !_ayarlarAcik && !_yonetimAcik;
         if (arkadaslarSecili) Cizim.YuvarlakDoldur(g, oge, Tema.S(6), Tema.YuzeyUst);
         else if (_uzerinde == "arkadaslar") Cizim.YuvarlakDoldur(g, oge, Tema.S(6), HoverZemin);
         var renk = arkadaslarSecili || _uzerinde == "arkadaslar" ? Tema.Metin : Tema.MetinIkincil;
@@ -106,19 +140,24 @@ public class KenarCubugu : Control
 
         // Direkt mesajlar
         TextRenderer.DrawText(g, "DİREKT MESAJLAR", Tema.Yazi(8.5f, kalin: true), new Point(Tema.S(20), Tema.S(134) + Ek), Tema.MetinSoluk, TextFormatFlags.NoPadding);
+        var ge = GrupEkleAlani;
+        if (_uzerinde == "grupekle") Cizim.YuvarlakDoldur(g, ge, Tema.S(6), Tema.YuzeyUst);
+        TextRenderer.DrawText(g, Glif.Arti, Cizim.Ikon(9.5f), ge, _uzerinde == "grupekle" ? Tema.Metin : Tema.MetinSoluk, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         var bolum = DmBolumu;
-        if (_sohbetler.Count == 0)
+        if (_ogeler.Count == 0)
         {
             TextRenderer.DrawText(g, "Bir arkadaşına mesaj at, sohbetiniz burada görünsün.", Tema.Yazi(9),
                 new Rectangle(Tema.S(20), bolum.Y + Tema.S(4), Width - Tema.S(40), Tema.S(40)), Tema.MetinSoluk, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
         }
         g.SetClip(bolum);
-        for (int i = 0; i < _sohbetler.Count; i++)
+        for (int i = 0; i < _ogeler.Count; i++)
         {
             var r = DmAlani(i);
             if (r.Bottom < bolum.Top || r.Top > bolum.Bottom) continue;
-            var s = _sohbetler[i];
-            bool secili = s.Karsi.Id == _secili, uzerinde = _uzerinde == "dm:" + i;
+            var o = _ogeler[i];
+            if (o.Grup is { } grup) { GrupSatiriCiz(g, r, grup, i); continue; }
+            var s = o.Dm!;
+            bool secili = s.Karsi.Id == _secili && _seciliGrup is null && !_secimYok, uzerinde = _uzerinde == "dm:" + i;
             var zemin = BackColor;
             if (secili) { Cizim.YuvarlakDoldur(g, r, Tema.S(6), Tema.YuzeyUst); zemin = Tema.YuzeyUst; }
             else if (uzerinde) { Cizim.YuvarlakDoldur(g, r, Tema.S(6), HoverZemin); zemin = HoverZemin; }
@@ -165,6 +204,24 @@ public class KenarCubugu : Control
         if (_uzerinde == "ayar" || _ayarlarAcik) Cizim.YuvarlakDoldur(g, ay, Tema.S(6), Tema.YuzeyUst);
         TextRenderer.DrawText(g, Glif.Ayarlar, Cizim.Ikon(12), ay, _uzerinde == "ayar" || _ayarlarAcik ? Tema.Metin : Tema.MetinIkincil,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+
+    // Grup satırı: yuvarlak grup ikonu, ad ve "n üye" (DM satırıyla aynı yerleşim).
+    private void GrupSatiriCiz(Graphics g, Rectangle r, Grup grup, int i)
+    {
+        bool secili = grup.Id == _seciliGrup, uzerinde = _uzerinde == "dm:" + i;
+        if (secili) Cizim.YuvarlakDoldur(g, r, Tema.S(6), Tema.YuzeyUst);
+        else if (uzerinde) Cizim.YuvarlakDoldur(g, r, Tema.S(6), HoverZemin);
+        int av = Tema.S(32);
+        IkonCizim.Grup(g, new RectangleF(r.X + Tema.S(8), r.Y + (r.Height - av) / 2f, av, av), grup.Renk, Ikonlar?.Grup(grup.Id, grup.IkonSurum));
+
+        bool okunmamis = grup.Okunmamis > 0;
+        int tx = r.X + Tema.S(50), tw = r.Right - tx - (okunmamis ? Tema.S(36) : Tema.S(8));
+        var ad = string.IsNullOrWhiteSpace(grup.Ad) ? string.Join(", ", grup.Uyeler.Select(u => u.GorunenAd)) : grup.Ad;
+        var adRenk = secili || okunmamis || uzerinde ? Tema.Metin : Tema.MetinIkincil;
+        TextRenderer.DrawText(g, ad, Tema.Yazi(10, kalin: okunmamis), new Rectangle(tx, r.Y + Tema.S(5), tw, Tema.S(18)), adRenk, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, $"{grup.Uyeler.Count} üye", Tema.Yazi(8.5f), new Rectangle(tx, r.Y + Tema.S(24), tw, Tema.S(16)), Tema.MetinSoluk, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        if (okunmamis) Cizim.Rozet(g, new Point(r.Right - Tema.S(8), r.Y + r.Height / 2), grup.Okunmamis);
     }
 
     private void PartiCiz(Graphics g)
@@ -220,8 +277,9 @@ public class KenarCubugu : Control
         if (AyarAlani.Contains(p)) return "ayar";
         if (ArkadaslarAlani.Contains(p)) return "arkadaslar";
         if (_admin && YonetimAlani.Contains(p)) return "yonetim";
+        if (GrupEkleAlani.Contains(p)) return "grupekle";
         if (DmBolumu.Contains(p))
-            for (int i = 0; i < _sohbetler.Count; i++)
+            for (int i = 0; i < _ogeler.Count; i++)
                 if (DmAlani(i).Contains(p)) return "dm:" + i;
         return null;
     }
@@ -236,6 +294,7 @@ public class KenarCubugu : Control
         _ipucu.Hide(this);
         if (yeni == "ayar") _ipucu.Show("Ayarlar", this, AyarAlani.X - Tema.S(30), AyarAlani.Y - Tema.S(34), 2500);
         if (yeni == "davet") _ipucu.Show("Arkadaş davet et", this, DavetAlani.X - Tema.S(30), DavetAlani.Y - Tema.S(34), 2500);
+        if (yeni == "grupekle") _ipucu.Show("Grup oluştur", this, GrupEkleAlani.X - Tema.S(40), GrupEkleAlani.Bottom + Tema.S(4), 2500);
         Invalidate();
     }
 
@@ -265,9 +324,14 @@ public class KenarCubugu : Control
         else if (b == "ayar") AyarTik?.Invoke();
         else if (b == "arkadaslar") ArkadaslarTik?.Invoke();
         else if (b == "yonetim") YonetimTik?.Invoke();
+        else if (b == "grupekle") GrupEkleTik?.Invoke();
         else if (b == "partikur") PartiKurTik?.Invoke();
         else if (b == "ayril") PartidenAyrilTik?.Invoke();
         else if (b == "davet") DavetTik?.Invoke(RectangleToScreen(DavetAlani));
-        else if (b?.StartsWith("dm:") == true && int.TryParse(b[3..], out var i) && i < _sohbetler.Count) SohbetTik?.Invoke(_sohbetler[i].Karsi.Id);
+        else if (b?.StartsWith("dm:") == true && int.TryParse(b[3..], out var i) && i < _ogeler.Count)
+        {
+            if (_ogeler[i].Grup is { } grup) GrupTik?.Invoke(grup.Id);
+            else SohbetTik?.Invoke(_ogeler[i].Dm!.Karsi.Id);
+        }
     }
 }

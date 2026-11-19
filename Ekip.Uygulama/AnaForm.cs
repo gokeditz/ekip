@@ -84,7 +84,7 @@ public partial class AnaForm : TemaliForm
 
         Text = "Ekip";
         ClientSize = new Size(Tema.S(1180), Tema.S(720));
-        MinimumSize = new Size(Tema.S(900), Tema.S(560));
+        MinimumSize = new Size(Tema.S(1040), Tema.S(600)); // sunucu rayı (72) + kenar çubuğu (248) + sohbet + üye listesi sığsın
 
         _arkadaslar.Avatarlar = _avatarlar;
         _kenar.Avatarlar = _avatarlar;
@@ -99,6 +99,7 @@ public partial class AnaForm : TemaliForm
         _kenar.AyarTik += () => AyarlariAc(AyarlarSayfasi.Sekme.Profil);
         _kenar.ArkadaslarTik += SohbetKapat;
         _kenar.SohbetTik += id => SohbetAc(id);
+        GezinmeKur(); // AnaForm.Gezinme.cs: sunucu rayı, kanal/üye listesi, Keşfet, gruplar
         _arkadaslar.Eylem += SatirEylemi;
         _ekle.Gonder += IstekGonder;
         _avatarlar.Yuklendi += () => { _arkadaslar.Invalidate(); _kenar.Invalidate(); _sohbet.Invalidate(true); };
@@ -141,6 +142,7 @@ public partial class AnaForm : TemaliForm
         _ = AdminMiKontrol();
         _ = _canli.Baslat();
         GuncellemeyiBaslat();
+        _ = GezinmeYukle();
         await Yenile();
     }
 
@@ -162,6 +164,7 @@ public partial class AnaForm : TemaliForm
             _bantZamanlayici.Dispose();
             _yaziyorZamanlayici.Dispose();
             _guncellemeZamanlayici.Dispose();
+            GezinmeTemizle();
             _ = _canli.DisposeAsync().AsTask();
         }
         base.Dispose(disposing);
@@ -309,6 +312,7 @@ public partial class AnaForm : TemaliForm
         _kenar.YonetimAcik = _yonetimAcik;
         if (sohbet || _ayarlarAcik || _yonetimAcik) _arkadaslar.Visible = _bos.Visible = _baslik.Visible = _ekle.Visible = false;
         PerformLayout();
+        GezinmeGorunumu(); // sunucu / Keşfet / grup görünümleri bunun üstüne biner
     }
 
     private void SohbetiYenidenCiz(long id)
@@ -361,6 +365,7 @@ public partial class AnaForm : TemaliForm
 
     private void MesajGeldi(Mesaj m)
     {
+        if (m.KanalId != null || m.GrupId != null) return; // kanal/grup mesajları AnaForm.Gezinme.cs'te (sohbet geliştiricisi: yerine SohbetDeposu gelecek)
         bool benden = m.GonderenId == _ben.Id;
         long karsi = benden ? m.AliciId : m.GonderenId;
 
@@ -452,7 +457,7 @@ public partial class AnaForm : TemaliForm
         _kenar.Bekleyen = _liste.Gelen.Count;
 
         OverlayArkadaslariYenile();
-        if (_aktif != null || _ayarlarAcik || _yonetimAcik) return; // Başka sayfa açıkken arkadaş sayfası gizli.
+        if (_aktif != null || _ayarlarAcik || _yonetimAcik || GezinmeIcerikAcik) return; // Başka sayfa açıkken arkadaş sayfası gizli.
         bool ekle = _sayfa == Sayfa.Ekle;
         _ekle.Visible = ekle;
         if (ekle) { _arkadaslar.Visible = _bos.Visible = _baslik.Visible = false; return; }
@@ -573,6 +578,7 @@ public partial class AnaForm : TemaliForm
         }
         m.Ayirici();
         m.Ekle("Profili düzenle", () => AyarlariAc(AyarlarSayfasi.Sekme.Profil));
+        m.Ekle("Kimliğimi kopyala", KimligiKopyala);
         m.Ekle("Kısayollar", () => AyarlariAc(AyarlarSayfasi.Sekme.Kisayollar));
         m.Ekle("Çıkış yap", () => CikisYapildi?.Invoke(), Tema.Hata);
         m.Closed += (_, _) => BeginInvoke(m.Dispose);
@@ -599,7 +605,7 @@ public partial class AnaForm : TemaliForm
     private void HapiYerlestir()
     {
         if (!_hap.Visible) return;
-        int kenarW = Tema.S(248), sagW = ClientSize.Width - kenarW;
+        int kenarW = Tema.S(248) + SunucuRayi.GerekenGenislik, sagW = ClientSize.Width - kenarW;
         var boyut = _hap.GerekenBoyut(sagW - Tema.S(60));
         _hap.Bounds = new Rectangle(kenarW + (sagW - boyut.Width) / 2, ClientSize.Height - boyut.Height - Tema.S(96), boyut.Width, boyut.Height);
     }
@@ -624,12 +630,12 @@ public partial class AnaForm : TemaliForm
         base.OnLayout(e);
         if (_kenar is null) return;
         int w = ClientSize.Width, h = ClientSize.Height;
-        int kenarW = Tema.S(248);
-        _kenar.Bounds = new Rectangle(0, 0, kenarW, h);
+        int rayW = SunucuRayi.GerekenGenislik, kenarW = Tema.S(248);
+        _kenar.Bounds = new Rectangle(rayW, 0, kenarW, h); // sunucu rayı en solda
 
-        int x = kenarW, sagW = w - kenarW;
+        int x = rayW + kenarW, sagW = w - x;
         _ust.Bounds = new Rectangle(x, 0, sagW, Tema.S(56));
-        int y = _aktif != null || _ayarlarAcik || _yonetimAcik ? 0 : _ust.Bottom;
+        int y = _aktif != null || _ayarlarAcik || _yonetimAcik || GezinmeIcerikAcik ? 0 : _ust.Bottom;
         if (_bant.Visible) { _bant.Bounds = new Rectangle(x, y, sagW, Tema.S(32)); y = _bant.Bottom; }
 
         int ic = Tema.S(20);
@@ -643,6 +649,7 @@ public partial class AnaForm : TemaliForm
         _arkadaslar.Bounds = new Rectangle(icerik.X, listeY, icerik.Width, icerik.Bottom - listeY);
         _bos.Bounds = icerik;
         _ekle.Bounds = new Rectangle(x, y, sagW, h - y);
+        GezinmeYerlestir(rayW, kenarW, x, y, sagW, h);
     }
 }
 
@@ -747,8 +754,12 @@ public class UstCubuk : Control
 public class EklePaneli : Panel
 {
     private readonly Label _baslik = new() { AutoSize = true, Text = "Arkadaş ekle", Font = Tema.Yazi(14, kalin: true), ForeColor = Tema.Metin };
-    private readonly Label _aciklama = new() { AutoSize = true, Text = "Arkadaşını kullanıcı adıyla ekleyebilirsin. Büyük-küçük harf fark etmez.", Font = Tema.Yazi(10), ForeColor = Tema.MetinIkincil };
-    private readonly GirisKutusu _ad = new() { Etiket = "Kullanıcı adı", IpucuYazisi = "ör. ahmet_42", MaksUzunluk = Kurallar.KullaniciAdiMax + 1 };
+    private readonly Label _aciklama = new() { AutoSize = true, Text = "Kullanıcı adıyla (ahmet_42) ya da #numarasıyla (#12) ekleyebilirsin. Büyük-küçük harf fark etmez.", Font = Tema.Yazi(10), ForeColor = Tema.MetinIkincil };
+    private readonly GirisKutusu _ad = new() { Etiket = "Kullanıcı adı ya da #numara", IpucuYazisi = "ör. ahmet_42 ya da #12", MaksUzunluk = Kurallar.KullaniciAdiMax + 1 };
+    private readonly Label _kimlikEtiket = new() { AutoSize = true, Text = "SENİN KİMLİĞİN", Font = Tema.Yazi(8.5f, kalin: true), ForeColor = Tema.MetinIkincil };
+    private readonly Label _kimlik = new() { AutoSize = true, Font = Tema.Yazi(11, kalin: true), ForeColor = Tema.Metin };
+    private readonly BaglantiYazi _kimlikKopya = new() { Text = "Kopyala" };
+    private Profil? _ben;
     private readonly Dugme _gonder = new() { Text = "İstek gönder" };
     private readonly Label _sonuc = new() { AutoSize = false, Font = Tema.Yazi(10, kalin: true) };
 
@@ -757,7 +768,15 @@ public class EklePaneli : Panel
     public EklePaneli()
     {
         BackColor = Tema.Arkaplan;
-        Controls.AddRange([_baslik, _aciklama, _ad, _gonder, _sonuc]);
+        Controls.AddRange([_baslik, _aciklama, _ad, _gonder, _sonuc, _kimlikEtiket, _kimlik, _kimlikKopya]);
+        _kimlikKopya.Click += async (_, _) =>
+        {
+            if (_ben is null) return;
+            try { Clipboard.SetText("#" + _ben.Id); } catch { return; }
+            _kimlikKopya.Text = "Kopyalandı";
+            await Task.Delay(1600);
+            if (!IsDisposed) _kimlikKopya.Text = "Kopyala";
+        };
         _gonder.Click += (_, _) => GonderTik();
         _ad.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; GonderTik(); } };
         _ad.TextChanged += (_, _) => { _sonuc.Text = ""; _gonder.Enabled = _ad.Text.Trim().Length > 0; };
@@ -768,6 +787,13 @@ public class EklePaneli : Panel
     {
         var ad = _ad.Text.Trim();
         if (ad.Length > 0 && _gonder.Enabled) Gonder?.Invoke(ad);
+    }
+
+    // Kendi kimliğim: arkadaşlar "Arkadaş ekle"ye #numarayı yazabilsin diye burada da görünür.
+    public Profil? Ben
+    {
+        get => _ben;
+        set { _ben = value; _kimlik.Text = value is null ? "" : $"@{value.KullaniciAdi}  ·  #{value.Id}"; PerformLayout(); }
     }
 
     public void Odaklan() => _ad.Focus();
@@ -798,6 +824,10 @@ public class EklePaneli : Panel
         _ad.Bounds = new Rectangle(x, y, w - dw - Tema.S(10), _ad.Height);
         _gonder.Bounds = new Rectangle(_ad.Right + Tema.S(10), _ad.Bottom - Tema.S(44), dw, Tema.S(44));
         _sonuc.Bounds = new Rectangle(x, _ad.Bottom + Tema.S(10), w, Tema.S(24));
+        int cizgiY = _sonuc.Bottom + Tema.S(20);
+        _kimlikEtiket.Location = new Point(x - Tema.S(3), cizgiY + Tema.S(22));
+        _kimlik.Location = new Point(x - Tema.S(3), _kimlikEtiket.Bottom + Tema.S(6));
+        _kimlikKopya.Location = new Point(_kimlik.Right + Tema.S(14), _kimlik.Top + (_kimlik.Height - _kimlikKopya.Height) / 2);
 
         Invalidate();
     }

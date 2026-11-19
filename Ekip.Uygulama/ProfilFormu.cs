@@ -16,6 +16,9 @@ public class ProfilDuzenleyici : Panel
 
     private readonly Label _baslik = new() { AutoSize = true, Text = "Profilini düzenle", Font = Tema.Yazi(16, kalin: true), ForeColor = Tema.Metin };
     private readonly Label _altBaslik = new() { AutoSize = true, Text = "Arkadaşların seni böyle görecek.", Font = Tema.Yazi(10), ForeColor = Tema.MetinIkincil };
+    // Kendi kimliğim: "@kullaniciadi · #id" ve kopyala (başlık satırının sağında).
+    private readonly Label _kimlik = new() { AutoSize = true, Font = Tema.Yazi(10.5f, kalin: true), ForeColor = Tema.MetinIkincil };
+    private readonly BaglantiYazi _kimlikKopya = new() { Text = "Kopyala" };
     private readonly Label _resimEtiket = Etiket("PROFİL RESMİ");
     private readonly Dugme _resimYukle = new() { Text = "Resim yükle", Height = Tema.S(36) };
     private readonly Dugme _resimKaldir = new() { Text = "Kaldır", Tur = Dugme.Turler.Ikincil, Height = Tema.S(36) };
@@ -46,7 +49,17 @@ public class ProfilDuzenleyici : Panel
         _hakkimda.Height = Tema.S(24) + Tema.S(104);
 
         _alt.Controls.AddRange([_hata, _vazgec, _kaydet]);
-        Controls.AddRange([_baslik, _altBaslik, _resimEtiket, _resimYukle, _resimKaldir, _gorunenAd, _durumMesaji, _hakkimda,
+        _kimlikKopya.Click += async (_, _) =>
+        {
+            try { Clipboard.SetText("#" + _ilk.Id); } catch { return; }
+            _kimlikKopya.Text = "Kopyalandı";
+            PerformLayout();
+            await Task.Delay(1600);
+            if (IsDisposed) return;
+            _kimlikKopya.Text = "Kopyala";
+            PerformLayout();
+        };
+        Controls.AddRange([_baslik, _altBaslik, _kimlik, _kimlikKopya, _resimEtiket, _resimYukle, _resimKaldir, _gorunenAd, _durumMesaji, _hakkimda,
             _renkEtiket, _renkler, _onizlemeEtiket, _onizleme, _alt]);
 
         foreach (var k in new[] { _gorunenAd, _durumMesaji, _hakkimda }) k.TextChanged += (_, _) => Onizle();
@@ -74,6 +87,7 @@ public class ProfilDuzenleyici : Panel
         _avatarKaldir = false;
         if (_onizlemeResmi != null && _onizlemeResmi != _avatarlar.Al(ben)) _onizlemeResmi.Dispose();
         _onizlemeResmi = _avatarlar.Al(ben);
+        _kimlik.Text = $"@{ben.KullaniciAdi}  ·  #{ben.Id}";
         _gorunenAd.Text = ben.GorunenAd;
         _durumMesaji.Text = ben.DurumMesaji;
         _hakkimda.Text = ben.Hakkimda;
@@ -176,6 +190,8 @@ public class ProfilDuzenleyici : Panel
         int solW = Tema.S(390);
 
         _baslik.Location = new Point(x - Tema.S(5), y); y = _baslik.Bottom;
+        _kimlik.Location = new Point(_baslik.Right + Tema.S(20), _baslik.Top + (_baslik.Height - _kimlik.Height) / 2 + Tema.S(2));
+        _kimlikKopya.Location = new Point(_kimlik.Right + Tema.S(12), _kimlik.Top + (_kimlik.Height - _kimlikKopya.Height) / 2);
         _altBaslik.Location = new Point(x - Tema.S(3), y); y = _altBaslik.Bottom + Tema.S(20);
 
         _resimEtiket.Location = new Point(x - Tema.S(3), y); y = _resimEtiket.Bottom + Tema.S(6);

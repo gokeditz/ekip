@@ -3,13 +3,14 @@ namespace Ekip.Uygulama;
 // Ana pencerenin içindeki Ayarlar sayfası: üstte sekmeler (Profil, Kısayollar), altında seçili sekmenin içeriği.
 public class AyarlarSayfasi : Control
 {
-    public enum Sekme { Profil, Kisayollar }
+    public enum Sekme { Profil, Kisayollar, Hakkinda }
 
     private Sekme _secili = Sekme.Profil;
     private Sekme? _uzerinde;
     private readonly List<(Sekme s, Rectangle r)> _alanlar = [];
     private readonly Control _profil;
     private readonly KisayolPaneli _kisayollar;
+    private readonly HakkindaPaneli _hakkinda = new();
 
     public KisayolPaneli Kisayollar => _kisayollar;
 
@@ -19,7 +20,7 @@ public class AyarlarSayfasi : Control
         BackColor = Tema.Arkaplan;
         _profil = profilDuzenleyici;
         _kisayollar = kisayollar;
-        Controls.AddRange([_profil, _kisayollar]);
+        Controls.AddRange([_profil, _kisayollar, _hakkinda]);
         Sec(Sekme.Profil);
     }
 
@@ -28,6 +29,7 @@ public class AyarlarSayfasi : Control
         _secili = s;
         _profil.Visible = s == Sekme.Profil;
         _kisayollar.Visible = s == Sekme.Kisayollar;
+        _hakkinda.Visible = s == Sekme.Hakkinda;
         Invalidate();
     }
 
@@ -37,7 +39,7 @@ public class AyarlarSayfasi : Control
     {
         base.OnLayout(e);
         if (_profil is null) return;
-        _profil.Bounds = _kisayollar.Bounds = new Rectangle(0, UstH, Width, Height - UstH);
+        _profil.Bounds = _kisayollar.Bounds = _hakkinda.Bounds = new Rectangle(0, UstH, Width, Height - UstH);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -56,7 +58,7 @@ public class AyarlarSayfasi : Control
 
         _alanlar.Clear();
         var f = Tema.Yazi(10, kalin: true);
-        foreach (var (s, ad) in new[] { (Sekme.Profil, "Profil"), (Sekme.Kisayollar, "Kısayollar") })
+        foreach (var (s, ad) in new[] { (Sekme.Profil, "Profil"), (Sekme.Kisayollar, "Kısayollar"), (Sekme.Hakkinda, "Hakkında") })
         {
             int w = TextRenderer.MeasureText(g, ad, f, Size.Empty, TextFormatFlags.NoPadding).Width + Tema.S(24);
             var r = new Rectangle(x, orta - Tema.S(16), w, Tema.S(32));
@@ -84,6 +86,37 @@ public class AyarlarSayfasi : Control
 
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _uzerinde = null; Invalidate(); }
     protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (Bul(e.Location) is { } s) Sec(s); }
+}
+
+// Ayarlar > Hakkında: sürüm ve kullanılan açık kaynak içeriklerin atıfları.
+public class HakkindaPaneli : Control
+{
+    public HakkindaPaneli()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        BackColor = Tema.Arkaplan;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        int x = Tema.S(32), y = Tema.S(26), w = Math.Min(Tema.S(760), Width - x * 2);
+        TextRenderer.DrawText(g, "Hakkında", Tema.Yazi(16, kalin: true), new Point(x - Tema.S(5), y), Tema.Metin, TextFormatFlags.NoPadding);
+        y += Tema.S(36);
+        TextRenderer.DrawText(g, "Ekip'i oyun oynarken arkadaşlarınla yazışmak için yaptık: hafif, hızlı, sade.", Tema.Yazi(10), new Rectangle(x - Tema.S(3), y, w, Tema.S(22)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        y += Tema.S(34);
+
+        void Satir(string baslik, string metin)
+        {
+            using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, x, y, x + w, y);
+            TextRenderer.DrawText(g, baslik, Tema.Yazi(10.5f, kalin: true), new Point(x, y + Tema.S(14)), Tema.Metin, TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, metin, Tema.Yazi(9.5f), new Rectangle(x, y + Tema.S(38), w, Tema.S(40)), Tema.MetinIkincil, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            y += Tema.S(78);
+        }
+        Satir("Sürüm", "Ekip " + Guncelleyici.MevcutSurumYazisi);
+        Satir("Emoji", "Emoji: Twemoji © Twitter / jdecked, CC-BY 4.0");
+    }
 }
 
 // Ayarlar > Kısayollar.
