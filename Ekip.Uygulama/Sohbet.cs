@@ -2,13 +2,6 @@ using Ekip.Ortak;
 
 namespace Ekip.Uygulama;
 
-// Bir sohbetin bellekte tutulan mesajları.
-public class SohbetVerisi
-{
-    public List<Mesaj> Liste = [];
-    public bool Yuklendi, Tumu, Yukleniyor;
-}
-
 public static class Zaman
 {
     public static DateTime Yerel(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
@@ -24,305 +17,88 @@ public static class Zaman
     public static string Gun(DateTime g) => g.ToString("d MMMM yyyy", Tema.Turkce);
 }
 
-// Mesajların çizildiği liste. Değişken yükseklikli satırlar, sadece görünenler çizilir.
-// Aynı kişinin 5 dakika içindeki ardışık mesajları tek başlık altında toplanır.
-public class MesajListesi : Control
+// Sohbet başlığında gösterilecek bilgiler. DM: Karsi (avatar + durum). Kanal: Ad + Alt (konu). Grup: Ad, Renk, Ikon, UyeSayisi.
+public sealed class SohbetBasligi
 {
-    private enum Tur { Baslangic, Tarih, Mesaj }
-    private record Oge(Tur Tur, Mesaj? M, bool GrupBasi, DateTime Gun, int Y, int H, int MetinH);
+    public string Ad { get; init; } = "";
+    public string? Alt { get; init; }
+    public Profil? Karsi { get; init; }
+    public string Renk { get; init; } = "#7C5CFF";
+    public Image? Ikon { get; init; }
+    public int UyeSayisi { get; init; }
 
-    private Profil? _ben, _karsi;
-    private List<Mesaj> _mesajlar = [];
-    private bool _tumu;
-    private HashSet<string> _basarisiz = [];
-    private List<Oge> _ogeler = [];
-    private int _toplamH, _kaydirma, _olcuGenisligi = -1, _uzerinde = -1;
-    private int? _surukleBaslangic;
-    private int _surukleKaydirma;
-
-    public AvatarOnbellek? Avatarlar { get; set; }
-    public event Action? EskiIste;
-    public event Action<Mesaj>? TekrarDene;
-
-    private const TextFormatFlags MetinBicimi = TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
-    private static Font MetinYazisi => Tema.Yazi(10.5f);
-
-    public MesajListesi()
-    {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
-        BackColor = Tema.Arkaplan;
-    }
-
-    private int MetinX => Tema.S(72);
-    private int MetinW => Math.Max(Tema.S(50), Width - MetinX - Tema.S(34));
-    private int MaksKaydirma => Math.Max(0, _toplamH - Height);
-    private bool KaydirmaVar => _toplamH > Height;
-    private bool Altta => _kaydirma >= MaksKaydirma - Tema.S(30);
-    // İçerik kısaysa mesajlar alta yaslanır (sohbet uygulamalarındaki gibi).
-    private int UstBosluk => Math.Max(0, Height - _toplamH);
-
-    public void Ayarla(Profil ben, Profil karsi, List<Mesaj> mesajlar, bool tumu, HashSet<string> basarisiz)
-    {
-        bool yeniSohbet = _karsi?.Id != karsi.Id;
-        bool alttaydi = Altta;
-        int eskiToplam = _toplamH;
-        long? eskiIlk = _mesajlar.FirstOrDefault()?.Id;
-        bool eskiTumu = _tumu;
-
-        _ben = ben;
-        _karsi = karsi;
-        _mesajlar = mesajlar;
-        _tumu = tumu;
-        _basarisiz = basarisiz;
-        Yerlesim();
-
-        if (yeniSohbet || eskiIlk is null) _kaydirma = MaksKaydirma;
-        else if (eskiIlk != null && mesajlar.Count > 0 && mesajlar[0].Id != eskiIlk && mesajlar.Any(m => m.Id == eskiIlk) || (!eskiTumu && tumu))
-            _kaydirma = Math.Clamp(_kaydirma + (_toplamH - eskiToplam), 0, MaksKaydirma); // Eskiler üste eklendi: görünen yer kaymasın.
-        else if (alttaydi) _kaydirma = MaksKaydirma;
-        else _kaydirma = Math.Clamp(_kaydirma, 0, MaksKaydirma);
-        Invalidate();
-        EskileriGerekirseIste();
-    }
-
-    public void KarsiGuncelle(Profil p) { _karsi = p; Invalidate(); }
-    public void Alta() { _kaydirma = MaksKaydirma; Invalidate(); }
-
-    private void Yerlesim()
-    {
-        _olcuGenisligi = MetinW;
-        var ogeler = new List<Oge>();
-        int y = 0;
-        if (_tumu && _karsi != null) { ogeler.Add(new Oge(Tur.Baslangic, null, false, default, y, Tema.S(200), 0)); y += Tema.S(200); }
-
-        Mesaj? onceki = null;
-        foreach (var m in _mesajlar)
-        {
-            var gun = Zaman.Yerel(m.Zaman).Date;
-            if (onceki is null || Zaman.Yerel(onceki.Zaman).Date != gun)
-            {
-                ogeler.Add(new Oge(Tur.Tarih, null, false, gun, y, Tema.S(48), 0));
-                y += Tema.S(48);
-                onceki = null;
-            }
-            bool grupBasi = onceki is null || onceki.GonderenId != m.GonderenId || m.Zaman - onceki.Zaman > 5 * 60 * 1000;
-            int metinH = TextRenderer.MeasureText(m.Metin, MetinYazisi, new Size(_olcuGenisligi, int.MaxValue), MetinBicimi).Height;
-            int h = metinH + Tema.S(4) + (grupBasi ? Tema.S(40) : 0) + (Basarisiz(m) ? Tema.S(20) : 0);
-            ogeler.Add(new Oge(Tur.Mesaj, m, grupBasi, gun, y, h, metinH));
-            y += h;
-            onceki = m;
-        }
-        _ogeler = ogeler;
-        _toplamH = y + Tema.S(18);
-    }
-
-    private bool Basarisiz(Mesaj m) => m.IstemciId != null && m.Id < 0 && _basarisiz.Contains(m.IstemciId);
-
-    // Grup sohbetinde (parti) gönderen ben ya da karşı taraf değil: kim olduğunu bu söyler.
-    public Func<long, Profil?>? Cozucu { get; set; }
-
-    private Profil? Sahibi(Mesaj m) => m.GonderenId == _ben?.Id ? _ben : Cozucu?.Invoke(m.GonderenId) ?? _karsi;
-
-    private int EkranY(Oge o) => o.Y - _kaydirma + UstBosluk;
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.Clear(BackColor);
-        if (_karsi is null || _ben is null) return;
-
-        // İlk görünen öğeyi ikili arama ile bul.
-        int lo = 0, hi = _ogeler.Count - 1, ilk = 0;
-        while (lo <= hi)
-        {
-            int mid = (lo + hi) / 2;
-            if (_ogeler[mid].Y + _ogeler[mid].H < _kaydirma - UstBosluk) lo = mid + 1; else { ilk = mid; hi = mid - 1; }
-        }
-
-        for (int i = ilk; i < _ogeler.Count; i++)
-        {
-            var o = _ogeler[i];
-            int y = EkranY(o);
-            if (y > Height) break;
-            var w = Width - (KaydirmaVar ? Tema.S(12) : 0);
-
-            switch (o.Tur)
-            {
-                case Tur.Baslangic:
-                {
-                    int x = Tema.S(18);
-                    int av = Tema.S(80);
-                    Cizim.Avatar(g, new RectangleF(x, y + Tema.S(24), av, av), _karsi, Avatarlar?.Al(_karsi), BackColor, false);
-                    TextRenderer.DrawText(g, _karsi.GorunenAd, Tema.Yazi(18, kalin: true), new Point(x - Tema.S(2), y + Tema.S(112)), Tema.Metin, TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, $"Bu, {_karsi.GorunenAd} ile olan mesajlaşmanın başlangıcı. Selam ver!",
-                        Tema.Yazi(10.5f), new Rectangle(x, y + Tema.S(152), w - x * 2, Tema.S(24)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-                    break;
-                }
-                case Tur.Tarih:
-                {
-                    int orta = y + o.H / 2 + Tema.S(4);
-                    var yazi = Zaman.Gun(o.Gun);
-                    var f = Tema.Yazi(8.5f, kalin: true);
-                    var olcu = TextRenderer.MeasureText(g, yazi, f, Size.Empty, TextFormatFlags.NoPadding);
-                    int tx = (w - olcu.Width) / 2;
-                    using (var p = new Pen(Tema.Kenar))
-                    {
-                        g.DrawLine(p, Tema.S(18), orta, tx - Tema.S(10), orta);
-                        g.DrawLine(p, tx + olcu.Width + Tema.S(10), orta, w - Tema.S(18), orta);
-                    }
-                    TextRenderer.DrawText(g, yazi, f, new Point(tx, orta - olcu.Height / 2), Tema.MetinSoluk, TextFormatFlags.NoPadding);
-                    break;
-                }
-                case Tur.Mesaj:
-                {
-                    var m = o.M!;
-                    if (i == _uzerinde) using (var b = new SolidBrush(ColorTranslator.FromHtml("#1B1C21"))) g.FillRectangle(b, 0, y + (o.GrupBasi ? Tema.S(14) : 0), w, o.H - (o.GrupBasi ? Tema.S(14) : 0));
-
-                    int metinY = y + Tema.S(2);
-                    if (o.GrupBasi)
-                    {
-                        var sahip = Sahibi(m)!;
-                        int av = Tema.S(40);
-                        Cizim.Avatar(g, new RectangleF(Tema.S(18), y + Tema.S(18), av, av), sahip, Avatarlar?.Al(sahip), BackColor, false);
-                        var adF = Tema.Yazi(10.5f, kalin: true);
-                        var adW = TextRenderer.MeasureText(g, sahip.GorunenAd, adF, Size.Empty, TextFormatFlags.NoPadding).Width;
-                        TextRenderer.DrawText(g, sahip.GorunenAd, adF, new Point(MetinX, y + Tema.S(18)), Tema.Metin, TextFormatFlags.NoPadding);
-                        TextRenderer.DrawText(g, Zaman.Uzun(m.Zaman), Tema.Yazi(8.5f), new Point(MetinX + adW + Tema.S(8), y + Tema.S(21)), Tema.MetinSoluk, TextFormatFlags.NoPadding);
-                        metinY = y + Tema.S(42);
-                    }
-                    else if (i == _uzerinde)
-                    {
-                        TextRenderer.DrawText(g, Zaman.Kisa(m.Zaman), Tema.Yazi(8), new Rectangle(0, metinY + Tema.S(2), MetinX - Tema.S(8), Tema.S(16)),
-                            Tema.MetinSoluk, TextFormatFlags.Right | TextFormatFlags.NoPadding);
-                    }
-
-                    bool basarisiz = Basarisiz(m);
-                    var renk = basarisiz ? Tema.Hata : m.Id < 0 ? Tema.MetinSoluk : ColorTranslator.FromHtml("#DCDDE3");
-                    TextRenderer.DrawText(g, m.Metin, MetinYazisi, new Rectangle(MetinX, metinY, _olcuGenisligi, o.MetinH + 2), renk, MetinBicimi);
-                    if (basarisiz)
-                        TextRenderer.DrawText(g, "Gönderilemedi. Tekrar denemek için tıkla.", Tema.Yazi(8.5f, kalin: true),
-                            new Point(MetinX, metinY + o.MetinH + Tema.S(3)), Tema.Hata, TextFormatFlags.NoPadding);
-                    break;
-                }
-            }
-        }
-
-        if (KaydirmaVar) Cizim.YuvarlakDoldur(g, KaydirmaCubugu(), Tema.S(3), _surukleBaslangic != null ? Tema.KenarHover : Tema.Kenar);
-    }
-
-    private Rectangle KaydirmaCubugu()
-    {
-        int h = Math.Max(Tema.S(40), Height * Height / Math.Max(1, _toplamH));
-        int y = MaksKaydirma == 0 ? 0 : (Height - h) * _kaydirma / MaksKaydirma;
-        return new Rectangle(Width - Tema.S(9), y, Tema.S(6), h);
-    }
-
-    private int Bul(Point p)
-    {
-        for (int i = 0; i < _ogeler.Count; i++)
-        {
-            var o = _ogeler[i];
-            int y = EkranY(o);
-            if (o.Tur == Tur.Mesaj && p.Y >= y + (o.GrupBasi ? Tema.S(14) : 0) && p.Y < y + o.H) return i;
-            if (y > p.Y) break;
-        }
-        return -1;
-    }
-
-    private void EskileriGerekirseIste()
-    {
-        if (!_tumu && _mesajlar.Count > 0 && _kaydirma < Tema.S(300)) EskiIste?.Invoke();
-    }
-
-    protected override void OnResize(EventArgs e)
-    {
-        base.OnResize(e);
-        if (_karsi is null) return;
-        bool alttaydi = Altta;
-        if (MetinW != _olcuGenisligi) Yerlesim();
-        _kaydirma = alttaydi ? MaksKaydirma : Math.Clamp(_kaydirma, 0, MaksKaydirma);
-    }
-
-    protected override void OnMouseWheel(MouseEventArgs e)
-    {
-        base.OnMouseWheel(e);
-        _kaydirma = Math.Clamp(_kaydirma - e.Delta * Tema.S(60) / 120, 0, MaksKaydirma);
-        _uzerinde = Bul(e.Location);
-        Invalidate();
-        EskileriGerekirseIste();
-    }
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        base.OnMouseMove(e);
-        if (_surukleBaslangic is { } bas)
-        {
-            int yol = Math.Max(1, Height - KaydirmaCubugu().Height);
-            _kaydirma = Math.Clamp(_surukleKaydirma + (e.Y - bas) * MaksKaydirma / yol, 0, MaksKaydirma);
-            Invalidate();
-            EskileriGerekirseIste();
-            return;
-        }
-        int i = Bul(e.Location);
-        if (i == _uzerinde) return;
-        _uzerinde = i;
-        Cursor = i >= 0 && Basarisiz(_ogeler[i].M!) ? Cursors.Hand : Cursors.Default;
-        Invalidate();
-    }
-
-    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _uzerinde = -1; Invalidate(); }
-
-    protected override void OnMouseDown(MouseEventArgs e)
-    {
-        base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left && KaydirmaVar && e.X > Width - Tema.S(14))
-        {
-            var c = KaydirmaCubugu();
-            if (!c.Contains(e.Location)) { _kaydirma = Math.Clamp(_kaydirma + (e.Y < c.Y ? -Height : Height), 0, MaksKaydirma); Invalidate(); return; }
-            _surukleBaslangic = e.Y;
-            _surukleKaydirma = _kaydirma;
-            Capture = true;
-        }
-    }
-
-    protected override void OnMouseUp(MouseEventArgs e)
-    {
-        base.OnMouseUp(e);
-        if (_surukleBaslangic != null) { _surukleBaslangic = null; Capture = false; Invalidate(); return; }
-        int i = Bul(e.Location);
-        if (i < 0) return;
-        var m = _ogeler[i].M!;
-        if (e.Button == MouseButtons.Left && Basarisiz(m)) TekrarDene?.Invoke(m);
-        else if (e.Button == MouseButtons.Right)
-        {
-            var menu = new KoyuMenu();
-            menu.Ekle("Metni kopyala", () => { try { Clipboard.SetText(m.Metin); } catch { } });
-            menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
-            menu.Show(this, e.Location);
-        }
-    }
+    public static SohbetBasligi Dm(Profil p) => new() { Ad = p.GorunenAd, Karsi = p };
+    public static SohbetBasligi Kanal(string ad, string konu) => new() { Ad = ad, Alt = konu };
+    public static SohbetBasligi Grup(string ad, string renk, Image? ikon, int uyeSayisi) =>
+        new() { Ad = ad, Renk = renk, Ikon = ikon, UyeSayisi = uyeSayisi };
 }
 
-// Açık sohbet: üstte kişi bilgisi, ortada mesajlar, altta yazma kutusu.
-public class SohbetPaneli : Control
+// Açık sohbet: üstte başlık, ortada mesajlar, altta yazma kutusu. DM, kanal, grup için aynı panel.
+//
+//   panel.Depo = depo; panel.Api = api; panel.Ben = ben; panel.Avatarlar = avatarlar;
+//   panel.Uyeler = uyeProfilleri;                    // bahsetme önerisi ve gönderen çözümü (kanal/grup)
+//   panel.Ac(new KonusmaKimligi(KonusmaTuru.Kanal, id), SohbetBasligi.Kanal("genel", "konu"));
+//
+// Depo verilmezse (parti sohbeti) Goster(...) ile elle veri verilir, Gonder olayı kullanılır.
+public sealed class SohbetPaneli : Control
 {
-    private Profil? _karsi;
-    private string? _yaziyor;
     private readonly MesajListesi _liste = new();
-    private readonly GirisKutusu _girdi = new() { CokSatir = true, MaksUzunluk = Kurallar.MesajMax };
+    private readonly YazmaKutusu _yazma = new();
+    private SohbetDeposu? _depo;
+    private KonusmaKimligi? _kimlik;
+    private SohbetBasligi? _baslik;
+    private SohbetVerisi? _veri;
+    private Profil? _ben;
+    private IReadOnlyList<Profil> _uyeler = [];
+    private Dictionary<long, Profil> _uyeSozlugu = [];
+    private readonly Dictionary<KonusmaKimligi, string> _taslaklar = [];
+    private string _yaziyor = "";
+    private string _ustHedef = "";
+    private bool _basit, _uyeDugmesi, _uyeDugmesiAcik;
 
+    // Depo yokken (parti) yazılan mesaj.
     public event Action<string>? Gonder;
-    public event Action? Yaziyor;
-    public event Action? EskiIste { add => _liste.EskiIste += value; remove => _liste.EskiIste -= value; }
-    public event Action<Mesaj>? TekrarDene { add => _liste.TekrarDene += value; remove => _liste.TekrarDene -= value; }
+    public event Action? EskiIste;
+    public event Action? GrupAyarTik;
+    public event Action? UyeDugmesiTik;
+    public event Action<string>? BahsetmeTik;
+    public event Action<string, bool>? Bildirim;
 
-    public AvatarOnbellek? Avatarlar { get => _liste.Avatarlar; set => _liste.Avatarlar = value; }
-    public long? KarsiId => _karsi?.Id;
-    public Func<long, Profil?>? Cozucu { get => _liste.Cozucu; set => _liste.Cozucu = value; }
-    public string? Ipucu { get; set; } // Yazma kutusundaki ipucunu değiştirmek için (parti sohbeti).
+    public SohbetDeposu? Depo
+    {
+        get => _depo;
+        set
+        {
+            if (_depo != null) { _depo.Degisti -= DepoDegisti; _depo.YaziyorDegisti -= YaziyorDegisti; }
+            _depo = value;
+            if (_depo != null) { _depo.Degisti += DepoDegisti; _depo.YaziyorDegisti += YaziyorDegisti; }
+        }
+    }
 
-    public bool BaslikGizli { get; set; } // Overlay'deki parti sohbetinde başlık sekmede zaten var.
+    public Api? Api { get => _liste.Api; set { _liste.Api = value; _yazma.Api = value; } }
+    public AvatarOnbellek? Avatarlar { get => _liste.Avatarlar; set { _liste.Avatarlar = value; _yazma.Avatarlar = value; } }
+    public Profil? Ben
+    {
+        get => _ben;
+        set { _ben = value; if (value != null) _yazma.BenId = value.Id; UyeleriYenile(); Invalidate(true); }
+    }
+    public Func<long, Profil?>? Cozucu { get; set; }
+    public string? Ipucu { get; set; }
+    public bool BaslikGizli { get; set; }
+    public bool BaskalarininMesajlariniSilebilir { get => _liste.BaskalarininMesajlariniSilebilir; set => _liste.BaskalarininMesajlariniSilebilir = value; }
+    public KonusmaKimligi? Kimlik => _kimlik;
+    public long? KarsiId => _kimlik is { Tur: KonusmaTuru.Dm } k ? k.Id : null;
+
+    // Parti/overlay: yanıt, düzenleme, tepki, ek ve GIF yok.
+    public bool BasitMod { get => _basit; set { _basit = value; _liste.BasitMod = value; _yazma.BasitMod = value; PerformLayout(); } }
+
+    // Başlıkta üye listesi düğmesi (kanal/grup).
+    public bool UyeDugmesi { get => _uyeDugmesi; set { _uyeDugmesi = value; Invalidate(); } }
+    public bool UyeDugmesiAcik { get => _uyeDugmesiAcik; set { _uyeDugmesiAcik = value; Invalidate(); } }
+
+    // Sohbetin üyeleri (kendim dahil olabilir). Bahsetme önerisi, @bahsetme çizimi ve gönderen adı için.
+    public IReadOnlyList<Profil> Uyeler { get => _uyeler; set { _uyeler = value; UyeleriYenile(); } }
+
     private int BaslikH => BaslikGizli ? 0 : Tema.S(56);
     private int YaziyorH => Tema.S(24);
 
@@ -331,119 +107,344 @@ public class SohbetPaneli : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         BackColor = Tema.Arkaplan;
-        Controls.AddRange([_liste, _girdi]);
+        AllowDrop = _liste.AllowDrop = true;
+        Controls.AddRange([_liste, _yazma]);
+        _liste.Cozucu = Gonderen;
 
-        var tb = _girdi.IcKutu;
-        tb.AcceptsReturn = true;
-        tb.KeyDown += (_, e) =>
+        _yazma.YukseklikDegisti += () => PerformLayout();
+        _yazma.TekerlekIstendi += d => _liste.Kaydir(-d * Tema.S(60) / 120);
+        _yazma.Bildirim += (m, h) => Bildirim?.Invoke(m, h);
+        _yazma.Gonder += YazmaGonder;
+        _yazma.DuzenlemeKaydet += async (id, metin) => await DuzenlemeKaydet(id, metin);
+        _yazma.ModKapandi += () => _liste.Secili = null;
+        _yazma.Yaziyor += () => { if (_depo != null && _kimlik is { } k) _depo.YaziyorBildir(k); };
+        _yazma.GifSecildi += g =>
         {
-            if (e.KeyCode == Keys.Enter && !e.Shift)
-            {
-                e.SuppressKeyPress = true;
-                var metin = tb.Text.Trim();
-                if (metin.Length == 0) return;
-                tb.Clear();
-                Gonder?.Invoke(metin);
-            }
+            if (_depo is null || _kimlik is not { } k) return;
+            var ek = new Ek("gif", string.IsNullOrWhiteSpace(g.Baslik) ? "gif" : g.Baslik, "image/gif", 0, g.Url, g.OnizlemeUrl, g.Genislik, g.Yukseklik);
+            _depo.Gonder(k, "", _yazma.YanitId, null, [ek]);
+            _yazma.ModuKapat();
+            _liste.Secili = null;
+            _liste.Alta();
         };
-        tb.TextChanged += (_, _) =>
+        _yazma.SonMesajiDuzenle += () =>
         {
-            GirdiYuksekliginiAyarla();
-            if (tb.TextLength > 0) Yaziyor?.Invoke();
+            var m = _veri?.Liste.LastOrDefault(x => x.GonderenId == _ben?.Id && x.Id > 0 && !x.Silindi);
+            if (m != null) DuzenlemeyeGir(m);
         };
+
+        _liste.EskiIste += () => { if (_depo != null && _kimlik is { } k) _ = _depo.EskileriYukle(k); else EskiIste?.Invoke(); };
+        _liste.YenidenYukleIstendi += () => { if (_depo != null && _kimlik is { } k) _ = _depo.Ac(k); };
+        _liste.TekrarDene += m => { if (_depo != null && _kimlik is { } k && m.IstemciId != null) _ = _depo.TekrarDene(k, m.IstemciId); };
+        _liste.VazgecIstendi += m => { if (_depo != null && _kimlik is { } k && m.IstemciId != null) _depo.Vazgec(k, m.IstemciId); };
+        _liste.YanitIstendi += m =>
+        {
+            _yazma.YanitModu(m, Gonderen(m.GonderenId)?.GorunenAd ?? "?");
+            _liste.Secili = m.Id;
+        };
+        _liste.DuzenleIstendi += DuzenlemeyeGir;
+        _liste.SilIstendi += async m => await MesajSil(m);
+        _liste.TepkiIstendi += (m, e) => { if (_depo != null && _kimlik is { } k) _ = _depo.TepkiVer(k, m.Id, e); };
+        _liste.TepkiSeciciIstendi += (m, nokta) =>
+        {
+            if (AcilirPanel.YeniKapandi || FindForm() is null) return;
+            var s = new EmojiSecici();
+            s.Secildi += e => { if (_depo != null && _kimlik is { } k) _ = _depo.TepkiVer(k, m.Id, e); };
+            s.Goster(this, nokta);
+        };
+        _liste.BahsetmeTik += a => BahsetmeTik?.Invoke(a);
+        _liste.Bildirim += (m, h) => Bildirim?.Invoke(m, h);
+
+        DragEnter += SurukleGirdi; DragDrop += SurukleBirakildi;
+        _liste.DragEnter += SurukleGirdi; _liste.DragDrop += SurukleBirakildi;
     }
 
-    public void Goster(Profil ben, Profil karsi, SohbetVerisi v, HashSet<string> basarisiz)
+    private void SurukleGirdi(object? s, DragEventArgs e) =>
+        e.Effect = !_basit && e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
+
+    private void SurukleBirakildi(object? s, DragEventArgs e)
     {
-        bool yeni = _karsi?.Id != karsi.Id;
-        _karsi = karsi;
+        if (e.Data?.GetData(DataFormats.FileDrop) is string[] d) _yazma.DosyalariEkle(d);
+    }
+
+    // ---- Açma / gösterme ----
+
+    // Depo ile: konuşmayı açar (yükler, okundu yapar). Önce uygulamada "şu an baktığım konuşma" bilgisini güncelle.
+    public void Ac(KonusmaKimligi k, SohbetBasligi baslik)
+    {
+        if (_depo is null || _ben is null) return;
+        bool yeni = _kimlik != k;
         if (yeni)
         {
-            _yaziyor = null;
-            _girdi.Text = "";
+            if (_kimlik is { } eski) _taslaklar[eski] = _yazma.Metin;
+            _yazma.ModuKapat();
+            _yazma.Temizle();
+            _yazma.Metin = _taslaklar.GetValueOrDefault(k, "");
+            _yaziyor = "";
         }
-        _girdi.IpucuYazisi = Ipucu ?? $"{karsi.GorunenAd} kişisine mesaj gönder";
-        _liste.Ayarla(ben, karsi, v.Liste, v.Tumu, basarisiz);
+        _kimlik = k;
+        _baslik = baslik;
+        _veri = _depo.Veri(k);
+        _yazma.HerkesBahsedilebilir = k.Tur != KonusmaTuru.Dm;
+        UyeleriYenile();
+        _yazma.IpucuYazisi = Ipucu ?? IpucuUret();
+        _liste.Ayarla(_ben, baslik, k, _veri);
+        YaziyorYenile();
+        Invalidate();
+        _ = _depo.Ac(k);
+        if (yeni) _yazma.Odaklan();
+    }
+
+    // Depo olmadan (parti): veriyi elle ver.
+    public void Goster(Profil ben, SohbetBasligi baslik, SohbetVerisi veri)
+    {
+        _ben = ben;
+        _yazma.BenId = ben.Id;
+        _baslik = baslik;
+        _veri = veri;
+        _kimlik = null;
+        _yazma.IpucuYazisi = Ipucu ?? IpucuUret();
+        _liste.Ayarla(ben, baslik, null, veri);
         Invalidate();
     }
 
-    public void KarsiGuncelle(Profil p)
+    public void BasligiGuncelle(SohbetBasligi baslik)
     {
-        if (p.Id != _karsi?.Id) return;
-        _karsi = p;
-        _liste.KarsiGuncelle(p);
-        _girdi.IpucuYazisi = Ipucu ?? $"{p.GorunenAd} kişisine mesaj gönder";
+        _baslik = baslik;
+        _liste.BasligiGuncelle(baslik);
+        _yazma.IpucuYazisi = Ipucu ?? IpucuUret();
         Invalidate();
     }
 
-    public void YaziyorGoster(bool goster)
+    private string IpucuUret() => _kimlik?.Tur switch
     {
-        _yaziyor = goster && _karsi != null ? _karsi.GorunenAd : null;
+        KonusmaTuru.Kanal => $"#{_baslik?.Ad} kanalına mesaj gönder",
+        KonusmaTuru.Grup => $"{_baslik?.Ad} grubuna mesaj gönder",
+        _ => $"{_baslik?.Ad} kişisine mesaj gönder",
+    };
+
+    public void Odaklan() => _yazma.Odaklan();
+    public void TestDosya(params string[] y) => _yazma.DosyalariEkle(y); // TEST-GECICI
+    public void TestTikla(int x, int y, bool sag = false) => _liste.TestTikla(x, y, sag); // TEST-GECICI
+    public void Alta() => _liste.Alta();
+    public void MesajaGit(long id) => _liste.MesajaGit(id);
+
+    private void UyeleriYenile()
+    {
+        var tum = new List<Profil>(_uyeler);
+        if (_baslik?.Karsi is { } k && tum.All(p => p.Id != k.Id)) tum.Add(k);
+        if (_ben != null && tum.All(p => p.Id != _ben.Id)) tum.Add(_ben);
+        _uyeSozlugu = tum.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First());
+        _yazma.Uyeler = tum;
+        _liste.UyeleriAyarla(tum.Where(p => p.KullaniciAdi.Length > 0).Select(p => p.KullaniciAdi), _ben?.KullaniciAdi);
+    }
+
+    private Profil? Gonderen(long id)
+    {
+        if (_ben != null && id == _ben.Id) return _ben;
+        if (_baslik?.Karsi is { } k && k.Id == id) return k;
+        return _uyeSozlugu.GetValueOrDefault(id) ?? Cozucu?.Invoke(id);
+    }
+
+    // ---- Depo olayları ----
+
+    private void DepoDegisti(KonusmaKimligi k)
+    {
+        if (k != _kimlik || _veri is null || _ben is null) return;
+        _liste.Ayarla(_ben, _baslik, k, _veri);
+    }
+
+    private void YaziyorDegisti(KonusmaKimligi k)
+    {
+        if (k != _kimlik) return;
+        YaziyorYenile();
+    }
+
+    private void YaziyorYenile()
+    {
+        string yeni = "";
+        if (_depo != null && _kimlik is { } k)
+        {
+            var adlar = _depo.Yazanlar(k).Select(id => Gonderen(id)?.GorunenAd ?? "Biri").ToList();
+            yeni = adlar.Count switch { 0 => "", 1 => adlar[0], 2 => adlar[0] + " ve " + adlar[1], _ => "Birkaç kişi" };
+            if (adlar.Count >= 3) yeni = "!" + yeni; // ön ek: çoğul "yazıyor" metni
+        }
+        if (yeni == _yaziyor) return;
+        _yaziyor = yeni;
         Invalidate(new Rectangle(0, Height - YaziyorH, Width, YaziyorH));
     }
 
-    public void Odaklan() => _girdi.IcKutu.Focus();
-    public void Alta() => _liste.Alta();
+    // ---- Yazma kutusu eylemleri ----
 
-    private void GirdiYuksekliginiAyarla()
+    private void YazmaGonder(string metin, List<GonderilecekDosya> dosyalar)
     {
-        var tb = _girdi.IcKutu;
-        var olcu = TextRenderer.MeasureText(tb.Text.Length == 0 ? "A" : tb.Text + "A", tb.Font,
-            new Size(Math.Max(10, tb.Width), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-        int h = Math.Clamp(olcu.Height + Tema.S(26), Tema.S(48), Tema.S(170));
-        if (h != _girdi.Height) { _girdi.Height = h; PerformLayout(); }
+        if (_depo is null || _kimlik is not { } k) { if (metin.Length > 0) Gonder?.Invoke(metin); return; }
+        _depo.Gonder(k, metin, _yazma.YanitId, dosyalar);
+        _yazma.ModuKapat();
+        _liste.Secili = null;
+        _liste.Alta();
     }
+
+    private async Task DuzenlemeKaydet(long id, string metin)
+    {
+        if (_depo is null || _kimlik is not { } k) return;
+        var eski = _veri?.Liste.FirstOrDefault(m => m.Id == id);
+        _yazma.ModuKapat(olayVer: true);
+        if (eski != null && eski.Metin == metin) return;
+        var hata = await _depo.Duzenle(k, id, metin);
+        if (hata != null) Bildirim?.Invoke(hata, true);
+    }
+
+    private void DuzenlemeyeGir(Mesaj m)
+    {
+        if (m.GonderenId != _ben?.Id || m.Silindi || _basit) return;
+        _yazma.DuzenlemeModu(m);
+        _liste.Secili = m.Id;
+    }
+
+    private async Task MesajSil(Mesaj m)
+    {
+        if (_depo is null || _kimlik is not { } k || FindForm() is not { } f) return;
+        bool evet = await OnayKarti.Sor(f, "Mesaj silinsin mi?", "Bu mesaj herkes için silinecek. Bu işlem geri alınamaz.", "Sil");
+        if (!evet) return;
+        var hata = await _depo.Sil(k, m.Id);
+        if (hata != null) Bildirim?.Invoke(hata, true);
+    }
+
+    // ---- Yerleşim ve çizim ----
 
     protected override void OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
         if (_liste is null) return;
         int yan = Tema.S(16);
-        if (_girdi.Height < Tema.S(48)) _girdi.Height = Tema.S(48);
-        int girdiY = Height - YaziyorH - _girdi.Height;
-        _girdi.Bounds = new Rectangle(yan, girdiY, Width - yan * 2, _girdi.Height);
-        _liste.Bounds = new Rectangle(0, BaslikH, Width, girdiY - BaslikH - Tema.S(8));
+        int h = _yazma.GerekenYukseklik;
+        int yazmaY = Height - YaziyorH - h;
+        _yazma.Bounds = new Rectangle(yan, yazmaY, Math.Max(10, Width - yan * 2), h);
+        _liste.Bounds = new Rectangle(0, BaslikH, Width, Math.Max(10, yazmaY - BaslikH - Tema.S(8)));
+    }
+
+    // Başlıktaki tıklanabilir düğmeler.
+    private Rectangle GrupDugmesi => new(Width - Tema.S(52), (BaslikH - Tema.S(32)) / 2, Tema.S(36), Tema.S(32));
+    private Rectangle UyeDugmesiAlani
+    {
+        get
+        {
+            int sag = Width - Tema.S(16) - (_kimlik?.Tur == KonusmaTuru.Grup ? Tema.S(44) : 0);
+            return new Rectangle(sag - Tema.S(36), (BaslikH - Tema.S(32)) / 2, Tema.S(36), Tema.S(32));
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
         g.Clear(BackColor);
-        if (_karsi is null) return;
+        if (_baslik is null) return;
         if (!BaslikGizli) BaslikCiz(g);
         YaziyorCiz(g);
     }
 
     private void BaslikCiz(Graphics g)
     {
-        if (_karsi is null) return;
-        int av = Tema.S(28);
+        var b = _baslik!;
         int x = Tema.S(18);
-        Cizim.Avatar(g, new RectangleF(x, (BaslikH - av) / 2f, av, av), _karsi, Avatarlar?.Al(_karsi), BackColor);
-        x += av + Tema.S(12);
+        int sagSinir = Width - Tema.S(16);
+        var tur = _kimlik?.Tur ?? KonusmaTuru.Dm;
+        string alt;
         var adF = Tema.Yazi(11.5f, kalin: true);
-        var adW = TextRenderer.MeasureText(g, _karsi.GorunenAd, adF, Size.Empty, TextFormatFlags.NoPadding).Width;
-        TextRenderer.DrawText(g, _karsi.GorunenAd, adF, new Rectangle(x, 0, adW + 4, BaslikH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-        x += adW + Tema.S(14);
+        if (tur == KonusmaTuru.Kanal)
+        {
+            TextRenderer.DrawText(g, "#", Tema.Yazi(15, kalin: true), new Rectangle(x, 0, Tema.S(20), BaslikH), Tema.MetinSoluk, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            x += Tema.S(22);
+            alt = b.Alt ?? "";
+        }
+        else if (tur == KonusmaTuru.Grup)
+        {
+            int av = Tema.S(28);
+            IkonCizim.Grup(g, new RectangleF(x, (BaslikH - av) / 2f, av, av), b.Renk, b.Ikon);
+            x += av + Tema.S(12);
+            alt = $"{b.UyeSayisi} üye";
+        }
+        else
+        {
+            int av = Tema.S(28);
+            if (b.Karsi != null) Cizim.Avatar(g, new RectangleF(x, (BaslikH - av) / 2f, av, av), b.Karsi, Avatarlar?.Al(b.Karsi), BackColor);
+            x += av + Tema.S(12);
+            var k = b.Karsi;
+            alt = k is null ? "" : string.IsNullOrWhiteSpace(k.DurumMesaji) || k.Durum == Durum.Cevrimdisi ? Cizim.DurumAdi(k.Durum) : k.DurumMesaji;
+        }
+        if (_uyeDugmesi && tur != KonusmaTuru.Dm) sagSinir = UyeDugmesiAlani.Left - Tema.S(8);
+        else if (tur == KonusmaTuru.Grup) sagSinir = GrupDugmesi.Left - Tema.S(8);
 
-        var durum = string.IsNullOrWhiteSpace(_karsi.DurumMesaji) || _karsi.Durum == Durum.Cevrimdisi ? Cizim.DurumAdi(_karsi.Durum) : _karsi.DurumMesaji;
-        using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, x, BaslikH / 2 - Tema.S(10), x, BaslikH / 2 + Tema.S(10));
-        x += Tema.S(14);
-        TextRenderer.DrawText(g, durum, Tema.Yazi(9.5f), new Rectangle(x, 0, Width - x - Tema.S(16), BaslikH), Tema.MetinIkincil,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        int adW = Math.Min(TextRenderer.MeasureText(g, b.Ad, adF, Size.Empty, TextFormatFlags.NoPadding).Width, Math.Max(Tema.S(60), (sagSinir - x) * 2 / 3));
+        TextRenderer.DrawText(g, b.Ad, adF, new Rectangle(x, 0, adW + 4, BaslikH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        x += adW + Tema.S(14);
+        if (alt.Length > 0 && x + Tema.S(40) < sagSinir)
+        {
+            using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, x, BaslikH / 2 - Tema.S(10), x, BaslikH / 2 + Tema.S(10));
+            x += Tema.S(14);
+            TextRenderer.DrawText(g, alt, Tema.Yazi(9.5f), new Rectangle(x, 0, sagSinir - x, BaslikH), Tema.MetinIkincil,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+
+        if (tur == KonusmaTuru.Grup) BaslikDugmesi(g, GrupDugmesi, Glif.Ayarlar, "grup", false);
+        if (_uyeDugmesi && tur != KonusmaTuru.Dm) BaslikDugmesi(g, UyeDugmesiAlani, Glif.Insanlar, "uye", _uyeDugmesiAcik);
         using (var p = new Pen(ColorTranslator.FromHtml("#0E0F12"))) g.DrawLine(p, 0, BaslikH - 1, Width, BaslikH - 1);
+    }
+
+    private void BaslikDugmesi(Graphics g, Rectangle r, string glif, string ad, bool secili)
+    {
+        bool u = _ustHedef == ad;
+        if (u || secili) Cizim.YuvarlakDoldur(g, r, Tema.S(6), secili ? Tema.YuzeyUst : Tema.Yuzey);
+        TextRenderer.DrawText(g, glif, Cizim.Ikon(12), r, u || secili ? Tema.Metin : Tema.MetinIkincil, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+
+    private string BaslikHedef(Point p)
+    {
+        if (BaslikGizli || p.Y > BaslikH) return "";
+        if (_kimlik?.Tur == KonusmaTuru.Grup && GrupDugmesi.Contains(p)) return "grup";
+        if (_uyeDugmesi && _kimlik?.Tur != KonusmaTuru.Dm && UyeDugmesiAlani.Contains(p)) return "uye";
+        return "";
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        var h = BaslikHedef(e.Location);
+        if (h == _ustHedef) return;
+        _ustHedef = h;
+        Cursor = h.Length > 0 ? Cursors.Hand : Cursors.Default;
+        Invalidate(new Rectangle(0, 0, Width, BaslikH));
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (_ustHedef.Length > 0) { _ustHedef = ""; Invalidate(new Rectangle(0, 0, Width, BaslikH)); } }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.Button != MouseButtons.Left) return;
+        var h = BaslikHedef(e.Location);
+        if (h == "grup") GrupAyarTik?.Invoke();
+        else if (h == "uye") UyeDugmesiTik?.Invoke();
     }
 
     private void YaziyorCiz(Graphics g)
     {
-        if (_yaziyor != null)
-        {
-            int y = Height - YaziyorH;
-            var kalin = Tema.Yazi(9, kalin: true);
-            var w = TextRenderer.MeasureText(g, _yaziyor, kalin, Size.Empty, TextFormatFlags.NoPadding).Width;
-            TextRenderer.DrawText(g, "• • •", Tema.Yazi(9, kalin: true), new Rectangle(Tema.S(18), y, Tema.S(30), YaziyorH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, _yaziyor, kalin, new Rectangle(Tema.S(50), y, w + 2, YaziyorH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, " yazıyor…", Tema.Yazi(9), new Rectangle(Tema.S(50) + w, y, Tema.S(100), YaziyorH), Tema.MetinIkincil, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-        }
+        if (_yaziyor.Length == 0) return;
+        bool cogul = _yaziyor.StartsWith('!');
+        var ad = cogul ? _yaziyor[1..] : _yaziyor;
+        int y = Height - YaziyorH;
+        var kalin = Tema.Yazi(9, kalin: true);
+        int w = TextRenderer.MeasureText(g, ad, kalin, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width;
+        w = Math.Min(w, Width - Tema.S(200));
+        TextRenderer.DrawText(g, "• • •", kalin, new Rectangle(Tema.S(18), y, Tema.S(30), YaziyorH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, ad, kalin, new Rectangle(Tema.S(50), y, w + 2, YaziyorH), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, " yazıyor…", Tema.Yazi(9), new Rectangle(Tema.S(50) + w, y, Tema.S(100), YaziyorH), Tema.MetinIkincil, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) Depo = null;
+        base.Dispose(disposing);
     }
 }

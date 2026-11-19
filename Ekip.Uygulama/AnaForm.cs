@@ -28,12 +28,10 @@ public partial class AnaForm : TemaliForm
     // Sohbetler
     private List<SohbetOzeti> _sohbetler = [];
     private long? _aktif;
-    private readonly Dictionary<long, SohbetVerisi> _mesajlar = [];
-    private readonly HashSet<string> _basarisiz = [];
+    private readonly SohbetDeposu _depo;
     private readonly SohbetPaneli _sohbet = new() { Visible = false };
-    private readonly System.Windows.Forms.Timer _yaziyorZamanlayici = new() { Interval = 6000 };
-    private DateTime _sonYaziyorBildirimi;
-    private int _geciciNo;
+
+    private static KonusmaKimligi Dm(long id) => new(KonusmaTuru.Dm, id);
 
     public event Action? CikisYapildi;
 
@@ -51,6 +49,11 @@ public partial class AnaForm : TemaliForm
         _ayarlar = ayarlar;
         _avatarlar = new AvatarOnbellek(api);
         _canli = new Canli(api);
+        _depo = new SohbetDeposu(api, _canli, ben.Id) { Goruyor = Goruyor };
+        _depo.Bildirim += (m, h) => Bildir(m, h);
+        _depo.OkunmamisDegisti += _ => KenariGuncelle();
+        _depo.YeniMesajGeldi += YeniMesajGeldi;
+        _depo.Degisti += k => { if (k.Tur == KonusmaTuru.Dm && _mini != null && !_miniParti && _miniDm == k.Id) MiniYenile(); };
 
         _yonetim = new YonetimSayfasi(api, this) { Visible = false, Avatarlar = _avatarlar };
         _yonetim.Bildir += (m, h) => Bildir(m, h);
@@ -91,6 +94,10 @@ public partial class AnaForm : TemaliForm
         _kenar.Ben = ben;
 
         _sohbet.Avatarlar = _avatarlar;
+        _sohbet.Api = api;
+        _sohbet.Depo = _depo;
+        _sohbet.Ben = ben;
+        _sohbet.Bildirim += (m, h) => Bildir(m, h);
         Controls.AddRange([_kenar, _ust, _bant, _baslik, _arkadaslar, _bos, _ekle, _sohbet, _ayarlarSayfasi, _yonetim]);
         _kenar.YonetimTik += async () => await YonetimiAc();
 
@@ -104,31 +111,11 @@ public partial class AnaForm : TemaliForm
         _avatarlar.Yuklendi += () => { _arkadaslar.Invalidate(); _kenar.Invalidate(); _sohbet.Invalidate(true); };
         _bantZamanlayici.Tick += (_, _) => { _bantZamanlayici.Stop(); BantGuncelle(); };
 
-        _sohbet.Gonder += metin => { if (_aktif is { } id) MesajGonder(id, metin); };
-        _sohbet.TekrarDene += async m => await Gonderimi(m);
-        _sohbet.EskiIste += async () => { if (_aktif is { } id) await MesajlariYukle(id, eski: true); };
-        _sohbet.Yaziyor += () =>
-        {
-            if (_aktif is not { } id || DateTime.Now - _sonYaziyorBildirimi < TimeSpan.FromSeconds(3)) return;
-            _sonYaziyorBildirimi = DateTime.Now;
-            _ = _canli.YaziyorBildir(id);
-        };
-        _yaziyorZamanlayici.Tick += (_, _) => { _yaziyorZamanlayici.Stop(); _sohbet.YaziyorGoster(false); };
-
         _canli.ArkadaslarDegisti += async () => await Yenile();
         _canli.ProfilDegisti += ProfilGeldi;
         _canli.DurumDegisti += DurumGeldi;
         _canli.BaglantiDegisti += b => { _bagli = b; BantGuncelle(); };
-        _canli.MesajGeldi += MesajGeldi;
-        _canli.SohbetOkundu += id => { OkunmamisAyarla(id, 0); };
         _canli.OturumSonlandi += sebep => { CikisSebebi = sebep; CikisYapildi?.Invoke(); };
-        _canli.Yaziyor += id =>
-        {
-            if (id != _aktif) return;
-            _sohbet.YaziyorGoster(true);
-            _yaziyorZamanlayici.Stop();
-            _yaziyorZamanlayici.Start();
-        };
 
         PartiOlaylariniBagla();
         SayfaAc(Sayfa.Cevrimici);
@@ -142,6 +129,22 @@ public partial class AnaForm : TemaliForm
         _ = _canli.Baslat();
         GuncellemeyiBaslat();
         await Yenile();
+        if (Environment.GetEnvironmentVariable("EKIP_SCRIPT") is { } sc) // TEST-GECICI
+        {
+            SohbetAc(2);
+            foreach (var a in sc.Split(';'))
+            {
+                if (a[0] == 'W') await Task.Delay(int.Parse(a[1..]) * 1000);
+                else if (a[0] == 'G') _depo.Gonder(Dm(2), a[2..]);
+                else if (a[0] == 'T') { var k = a[2..].Split(','); _sohbet.TestTikla(int.Parse(k[0]), int.Parse(k[1]), k.Length > 2); }
+            }
+        }
+        if (Environment.GetEnvironmentVariable("EKIP_TEST3") is { } tk) // TEST-GECICI
+        {
+            SohbetAc(2); await Task.Delay(2500);
+            foreach (var t in tk.Split(';')) { var a = t.Split(','); _sohbet.TestTikla(int.Parse(a[0]), int.Parse(a[1]), a.Length > 2); await Task.Delay(2500); }
+        }
+        if (Environment.GetEnvironmentVariable("EKIP_TEST") is { } tp) { SohbetAc(2); await Task.Delay(1500); _sohbet.TestDosya(tp.Split(';')); } // TEST-GECICI
     }
 
     // Yönetim sayfası sadece adminlere görünür. Sunucu admin değilse 403 döner.
@@ -160,7 +163,7 @@ public partial class AnaForm : TemaliForm
             _temizlendi = true;
             PartiTemizle();
             _bantZamanlayici.Dispose();
-            _yaziyorZamanlayici.Dispose();
+            _depo.Dispose();
             _guncellemeZamanlayici.Dispose();
             _ = _canli.DisposeAsync().AsTask();
         }
@@ -171,7 +174,7 @@ public partial class AnaForm : TemaliForm
     protected override void OnActivated(EventArgs e)
     {
         base.OnActivated(e);
-        if (_aktif is { } id) _ = OkunduYap(id);
+        if (_aktif is { } id) _depo.GoruntuleniyorsaOkundu(Dm(id));
     }
 
     // ---- Veri ----
@@ -195,6 +198,7 @@ public partial class AnaForm : TemaliForm
                 yeni.Insert(0, eski);
             _sohbetler = yeni.Where(x => _liste.Arkadaslar.Any(p => p.Id == x.Karsi.Id))
                 .Select(x => x with { Karsi = _liste.Arkadaslar.First(p => p.Id == x.Karsi.Id) }).ToList();
+            foreach (var o in s.Veri!) if (!Goruyor(Dm(o.Karsi.Id))) _depo.OkunmamisAyarla(Dm(o.Karsi.Id), o.Okunmamis);
             KenariGuncelle();
         }
 
@@ -205,7 +209,7 @@ public partial class AnaForm : TemaliForm
 
     private void ProfilGeldi(Profil p)
     {
-        if (p.Id == _ben.Id) { _ben = p; _kenar.Ben = p; _sohbet.Invalidate(true); return; }
+        if (p.Id == _ben.Id) { _ben = p; _kenar.Ben = p; _sohbet.Ben = p; return; }
         _liste = new ArkadasListesi(Degistir(_liste.Arkadaslar, p), Degistir(_liste.Gelen, p with { Durum = Durum.Cevrimdisi }), Degistir(_liste.Giden, p with { Durum = Durum.Cevrimdisi }));
         SohbetProfiliGuncelle(p);
         ListeyiGoster();
@@ -227,26 +231,26 @@ public partial class AnaForm : TemaliForm
         if (_sohbetler.All(x => x.Karsi.Id != p.Id)) return;
         _sohbetler = _sohbetler.Select(x => x.Karsi.Id == p.Id ? x with { Karsi = p } : x).ToList();
         KenariGuncelle();
-        _sohbet.KarsiGuncelle(p);
+        if (_aktif == p.Id) _sohbet.BasligiGuncelle(SohbetBasligi.Dm(p));
     }
 
     // ---- Sohbetler ----
+    // DM mantığı SohbetDeposu + SohbetPaneli'nde. Burada sadece kenar çubuğu listesi ve "şu an bakıyor muyum" bilgisi var.
 
-    private SohbetVerisi Veri(long id)
-    {
-        if (!_mesajlar.TryGetValue(id, out var v)) _mesajlar[id] = v = new SohbetVerisi();
-        return v;
-    }
+    // Konuşma şu an gözüyle görüyor mu? (ana pencerede açık ve odakta, ya da overlay/mini sohbette açık)
+    // Kanal/grup eklerken buraya kendi "aktif konuşma" kontrolünü ekle.
+    private bool Goruyor(KonusmaKimligi k) =>
+        k.Tur == KonusmaTuru.Dm && ((_aktif == k.Id && ActiveForm == this) || OverlayDmGoruyor(k.Id) || MiniDmGoruyor(k.Id));
 
     private void KenariGuncelle()
     {
-        _kenar.Sohbetler = _sohbetler;
+        _kenar.Sohbetler = _sohbetler.Select(x => x with { Okunmamis = _depo.Okunmamis(Dm(x.Karsi.Id)) }).ToList();
         _kenar.Secili = _aktif;
-        int toplam = _sohbetler.Sum(x => x.Okunmamis);
+        int toplam = _depo.ToplamDmOkunmamis;
         Text = toplam > 0 ? $"({toplam}) Ekip" : "Ekip";
     }
 
-    private async void SohbetAc(long id)
+    private void SohbetAc(long id)
     {
         var profil = _liste.Arkadaslar.FirstOrDefault(p => p.Id == id) ?? _sohbetler.FirstOrDefault(x => x.Karsi.Id == id)?.Karsi;
         if (profil is null) return;
@@ -255,15 +259,9 @@ public partial class AnaForm : TemaliForm
         _aktif = id;
         _ayarlarAcik = _yonetimAcik = false;
         KenariGuncelle();
-        _sohbet.YaziyorGoster(false);
-        _yaziyorZamanlayici.Stop();
         GorunumuAyarla();
-
-        var v = Veri(id);
-        _sohbet.Goster(_ben, profil, v, _basarisiz);
-        _sohbet.Odaklan();
-        if (!v.Yuklendi) await MesajlariYukle(id, eski: false);
-        await OkunduYap(id);
+        _sohbet.Ac(Dm(id), SohbetBasligi.Dm(profil));
+        _depo.GoruntuleniyorsaOkundu(Dm(id));
     }
 
     private void SohbetKapat()
@@ -311,125 +309,29 @@ public partial class AnaForm : TemaliForm
         PerformLayout();
     }
 
+    // Sunucudan yeni mesaj geldi: kenar çubuğundaki DM sırasını güncelle, bildirim ver. (Kanal/grup mesajları burada yok sayılır.)
+    private void YeniMesajGeldi(Mesaj m, KonusmaKimligi k)
+    {
+        if (k.Tur != KonusmaTuru.Dm) return;
+        bool benden = m.GonderenId == _ben.Id;
+        var profil = _liste.Arkadaslar.FirstOrDefault(p => p.Id == k.Id) ?? _sohbetler.FirstOrDefault(x => x.Karsi.Id == k.Id)?.Karsi;
+        if (profil is null) { _ = Yenile(); return; }
+        _sohbetler.RemoveAll(x => x.Karsi.Id == k.Id);
+        _sohbetler.Insert(0, new SohbetOzeti(profil, m, 0));
+        KenariGuncelle();
+        if (!benden && !Goruyor(k) && !OverlayAcik) Tema.Titret(this);
+        OverlayDmYenile(k.Id, profil);
+    }
+
     private void SohbetiYenidenCiz(long id)
     {
         var profil = _sohbetler.FirstOrDefault(x => x.Karsi.Id == id)?.Karsi ?? _liste.Arkadaslar.FirstOrDefault(p => p.Id == id);
         if (profil is null) return;
-        if (_aktif == id) _sohbet.Goster(_ben, profil, Veri(id), _basarisiz);
-        OverlayDmYenile(id, profil); // Overlay'de de aynı sohbet açıksa onu da güncelle.
+        OverlayDmYenile(id, profil);
     }
 
-    // Bu sohbeti şu an gözüyle görüyor mu? (ana pencerede açık ve odakta, ya da overlay'de açık)
-    private bool Goruyor(long id) => (_aktif == id && ActiveForm == this) || OverlayDmGoruyor(id) || MiniDmGoruyor(id);
-
-    private async Task MesajlariYukle(long id, bool eski)
-    {
-        var v = Veri(id);
-        if (v.Yukleniyor || (eski && (v.Tumu || !v.Yuklendi))) return;
-        v.Yukleniyor = true;
-        long? once = eski ? v.Liste.FirstOrDefault(m => m.Id > 0)?.Id : null;
-        var s = await _api.Mesajlar(id, once);
-        v.Yukleniyor = false;
-        if (!s.Basarili) { Bildir(s.Hata!, hata: true); return; }
-
-        var gelen = s.Veri!;
-        if (eski) v.Liste.InsertRange(0, gelen.Where(m => v.Liste.All(x => x.Id != m.Id)));
-        else
-        {
-            // Yüklenirken canlı gelmiş ya da gönderilmekte olan mesajlar kaybolmasın.
-            var ekstra = v.Liste.Where(x => gelen.All(m => m.Id != x.Id)).ToList();
-            v.Liste = [.. gelen, .. ekstra];
-        }
-        v.Tumu = gelen.Count < Kurallar.MesajSayfasi;
-        v.Yuklendi = true;
-        SohbetiYenidenCiz(id);
-    }
-
-    private async Task OkunduYap(long id)
-    {
-        var o = _sohbetler.FirstOrDefault(x => x.Karsi.Id == id);
-        if (o is null || o.Okunmamis == 0 || !Goruyor(id)) return;
-        OkunmamisAyarla(id, 0);
-        await _api.Okundu(id);
-    }
-
-    private void OkunmamisAyarla(long id, int sayi)
-    {
-        _sohbetler = _sohbetler.Select(x => x.Karsi.Id == id ? x with { Okunmamis = sayi } : x).ToList();
-        KenariGuncelle();
-    }
-
-    private void MesajGeldi(Mesaj m)
-    {
-        bool benden = m.GonderenId == _ben.Id;
-        long karsi = benden ? m.AliciId : m.GonderenId;
-
-        var v = Veri(karsi);
-        if (v.Yuklendi) MesajiYerlestir(v, m);
-
-        var profil = _liste.Arkadaslar.FirstOrDefault(p => p.Id == karsi) ?? _sohbetler.FirstOrDefault(x => x.Karsi.Id == karsi)?.Karsi;
-        if (profil is null) { _ = Yenile(); return; }
-
-        bool goruyorum = Goruyor(karsi);
-        var eski = _sohbetler.FirstOrDefault(x => x.Karsi.Id == karsi);
-        int okunmamis = (eski?.Okunmamis ?? 0) + (!benden && !goruyorum ? 1 : 0);
-        _sohbetler.RemoveAll(x => x.Karsi.Id == karsi);
-        _sohbetler.Insert(0, new SohbetOzeti(profil, m, okunmamis));
-        KenariGuncelle();
-
-        if (!benden)
-        {
-            if (_aktif == karsi) { _sohbet.YaziyorGoster(false); _yaziyorZamanlayici.Stop(); }
-            if (goruyorum) _ = _api.Okundu(karsi);
-            else if (!OverlayAcik) Tema.Titret(this);
-        }
-        SohbetiYenidenCiz(karsi);
-    }
-
-    // Sunucudan gelen mesajı listeye koyar: aynısı varsa atla, bekleyen kopyası varsa onun yerine geç.
-    private static void MesajiYerlestir(SohbetVerisi v, Mesaj m)
-    {
-        if (v.Liste.Any(x => x.Id == m.Id)) return;
-        if (m.IstemciId != null)
-        {
-            int i = v.Liste.FindIndex(x => x.Id < 0 && x.IstemciId == m.IstemciId);
-            if (i >= 0) { v.Liste[i] = m; return; }
-        }
-        // Gönderilmeyi bekleyenler hep en altta kalsın.
-        int ilkBekleyen = v.Liste.FindIndex(x => x.Id < 0);
-        if (ilkBekleyen < 0) v.Liste.Add(m); else v.Liste.Insert(ilkBekleyen, m);
-    }
-
-    private async void MesajGonder(long id, string metin)
-    {
-        var gecici = new Mesaj(-(++_geciciNo), _ben.Id, id, metin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Guid.NewGuid().ToString("N"));
-        var v = Veri(id);
-        if (!v.Yuklendi) await MesajlariYukle(id, eski: false);
-        v.Liste.Add(gecici);
-        SohbetiYenidenCiz(id);
-        if (_aktif == id) _sohbet.Alta(); // Kendi mesajını hep görsün, yukarıdayken bile.
-        await Gonderimi(gecici);
-    }
-
-    private async Task Gonderimi(Mesaj gecici)
-    {
-        _basarisiz.Remove(gecici.IstemciId!);
-        SohbetiYenidenCiz(gecici.AliciId);
-        var s = await _api.MesajGonder(gecici.AliciId, gecici.Metin, gecici.IstemciId!);
-        var v = Veri(gecici.AliciId);
-        if (!s.Basarili)
-        {
-            _basarisiz.Add(gecici.IstemciId!);
-            Bildir(s.Hata!, hata: true);
-            SohbetiYenidenCiz(gecici.AliciId);
-            return;
-        }
-        // Canlı bağlantıdan önce gelmiş olabilir; değilse burada yerleştir.
-        if (v.Liste.Any(x => x.Id == s.Veri!.Id)) v.Liste.RemoveAll(x => x.Id < 0 && x.IstemciId == gecici.IstemciId);
-        else MesajiYerlestir(v, s.Veri! with { IstemciId = gecici.IstemciId });
-        if (!_canli.Bagli) MesajGeldi(s.Veri!); // Canlı bağlantı yoksa kenar çubuğunu kendimiz güncelleyelim.
-        SohbetiYenidenCiz(gecici.AliciId);
-    }
+    // Mini sohbet / overlay için kısa gönderim (yalnızca metin).
+    private void MesajGonder(long id, string metin) => _depo.Gonder(Dm(id), metin);
 
     private static List<Profil> Degistir(List<Profil> liste, Profil yeni) =>
         liste.Select(x => x.Id == yeni.Id ? yeni : x).ToList();
