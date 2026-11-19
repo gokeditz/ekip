@@ -1,4 +1,4 @@
-# Ekip — Kurulum Rehberi
+# 31Hane — Kurulum Rehberi
 
 Bu rehber; sunucunun nerede çalıştığını, yeni sürüm yayınlamayı ve arkadaşlarına uygulamayı
 dağıtmayı anlatır.
@@ -76,8 +76,8 @@ güncellemeleri de buradan indirir.
    git push origin main v1.0.2
    ```
 3. GitHub birkaç dakika içinde Release'i oluşturur (`.github/workflows/surum.yml`):
-   - `Ekip-Windows.zip` → ilk kurulum için
-   - `Ekip-1.0.2.zip` + `son.json` → otomatik güncelleme için
+   - `31Hane-Windows.zip` → ilk kurulum için
+   - `31Hane-1.0.2.zip` + `son.json` → otomatik güncelleme için
 
 ### Otomatik güncelleme nasıl çalışır
 
@@ -97,9 +97,9 @@ powershell -ExecutionPolicy Bypass -File dagitim\guncelleme-paketle.ps1 -Surum 1
 ## 4. Arkadaşlara dağıtım
 
 Arkadaşlarına şu linki gönder (her zaman en son sürümü indirir):
-`https://github.com/gokeditz/ekip/releases/latest/download/Ekip-Windows.zip`
+`https://github.com/gokeditz/ekip/releases/latest/download/31Hane-Windows.zip`
 
-Zip'i bir klasöre açıp `Ekip.Uygulama.exe`'yi çalıştırsınlar. .NET kurmalarına gerek yok,
+Zip'i bir klasöre açıp `31Hane.exe`'yi çalıştırsınlar. .NET kurmalarına gerek yok,
 sunucu adresi uygulamanın içinde. Bundan sonraki sürümler kendiliğinden gelir.
 (Masaüstü/Program Files yerine kendi klasörlerine, ör. `Belgeler\Ekip`, açsınlar: güncelleme
 exe'nin yanına yazabilmeli.) Windows "bilinmeyen yayımcı" uyarısı verirse **Ek bilgi → Yine de çalıştır**.

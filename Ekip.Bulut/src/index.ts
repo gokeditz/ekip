@@ -178,7 +178,7 @@ export class EkipSunucu extends DurableObject<Env> {
     const m = istek.method;
     const ip = istek.headers.get("CF-Connecting-IP") ?? "?";
 
-    if (y === "/" && m === "GET") return new Response("Ekip sunucusu çalışıyor.", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    if (y === "/" && m === "GET") return new Response("31Hane sunucusu çalışıyor.", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
 
     // ---- Hesap (oturumsuz) ----
     if (m === "POST" && (y === "/api/kayit" || y === "/api/giris")) {

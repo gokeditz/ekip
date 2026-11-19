@@ -1,5 +1,5 @@
 ﻿# Otomatik güncelleme paketi hazırlar:
-#   yayin/guncelleme/Ekip-<sürüm>.zip  -> uygulamanın kendisi (tek exe)
+#   yayin/guncelleme/31Hane-<sürüm>.zip  -> uygulamanın kendisi (tek exe)
 #   yayin/guncelleme/son.json          -> { surum, indir, sha256, notlar }
 # Bu iki dosya GitHub Release'ine eklenince (surum.yml yapar) uygulamalar yeni sürümü kendileri bulur.
 #
@@ -28,7 +28,7 @@ dotnet publish (Join-Path $kok "Ekip.Uygulama") -c Release -r win-x64 --self-con
 if ($LASTEXITCODE -ne 0) { throw "Derleme başarısız" }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zipAdi = "Ekip-$Surum.zip"
+$zipAdi = "31Hane-$Surum.zip"
 $zip = Join-Path $cikti $zipAdi
 [IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
 $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()

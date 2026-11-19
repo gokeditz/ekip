@@ -27,8 +27,8 @@ public partial class AnaForm
         if (b is null || IsDisposed || b.Surum == _reddedilenSurum) return;
         _bekleyenGuncelleme = b;
         if (Visible && WindowState != FormWindowState.Minimized) await GuncellemeSor();
-        else _tepsi?.ShowBalloonTip(5000, "Ekip güncellemesi hazır",
-            $"Sürüm {b.Surum} çıktı. Güncellemek için Ekip'i aç.", ToolTipIcon.None);
+        else _tepsi?.ShowBalloonTip(5000, $"{Tema.UygulamaAdi} güncellemesi hazır",
+            $"Sürüm {b.Surum} çıktı. Güncellemek için {Tema.UygulamaAdi} uygulamasını aç.", ToolTipIcon.None);
     }
 
     // Pencere tepsiden açılınca bekleyen güncelleme varsa sor.
@@ -43,14 +43,14 @@ public partial class AnaForm
         _guncellemeSoruluyor = true;
         string notlar = string.IsNullOrWhiteSpace(b.Notlar) ? "" : "\n\n" + b.Notlar.Trim();
         bool evet = await OnayKarti.Sor(this, $"Yeni sürüm hazır: {b.Surum}",
-            $"Şu an {Guncelleyici.MevcutSurumYazisi} sürümünü kullanıyorsun. Güncelleme birkaç saniye sürer, Ekip kendiliğinden yeniden açılır.{notlar}",
+            $"Şu an {Guncelleyici.MevcutSurumYazisi} sürümünü kullanıyorsun. Güncelleme birkaç saniye sürer, {Tema.UygulamaAdi} kendiliğinden yeniden açılır.{notlar}",
             "Şimdi güncelle", tehlike: false);
         _guncellemeSoruluyor = false;
         if (!evet)
         {
             _reddedilenSurum = b.Surum; // Bu oturumda aynı sürüm için tekrar rahatsız etme.
             _bekleyenGuncelleme = null;
-            Bildir("Güncellemeyi Ekip'i bir dahaki açışında yapabilirsin.", hata: false);
+            Bildir("Güncellemeyi bir dahaki açılışta yapabilirsin.", hata: false);
             return;
         }
         await GuncellemeyiUygula(b);

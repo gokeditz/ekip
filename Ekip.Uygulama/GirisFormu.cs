@@ -28,7 +28,7 @@ public class GirisFormu : TemaliForm
     public GirisFormu(Ayarlar ayarlar)
     {
         _ayarlar = ayarlar;
-        Text = "Ekip";
+        Text = Tema.UygulamaAdi;
         ClientSize = new Size(Tema.S(980), Tema.S(620));
         MinimumSize = new Size(Tema.S(480), Tema.S(600));
 
@@ -78,7 +78,7 @@ public class GirisFormu : TemaliForm
     {
         _kayitModu = kayit;
         _baslik.Text = kayit ? "Hesap oluştur" : "Tekrar hoş geldin!";
-        _altBaslik.Text = kayit ? "Birkaç saniye sürer, sonra ekibe katıl." : "Ekibin seni bekliyor.";
+        _altBaslik.Text = kayit ? "Birkaç saniye sürer, sonra haneye katıl." : "Hane seni bekliyor.";
         _gonder.Text = kayit ? "Kayıt ol" : "Giriş yap";
         _modSoru.Text = kayit ? "Zaten hesabın var mı?" : "Hesabın yok mu?";
         _modDegistir.Text = kayit ? "Giriş yap" : "Kayıt ol";
@@ -173,7 +173,9 @@ public class GirisFormu : TemaliForm
     private void SunucuYazisiniGuncelle()
     {
         var uri = new Uri(_ayarlar.SunucuAdresi);
-        _sunucuAyari.Text = $"Sunucu: {uri.Authority}";
+        // Varsayılan sunucuda teknik adres yerine marka adı (adres Cloudflare'daki eski adla kaldı).
+        bool varsayilan = _ayarlar.SunucuAdresi.TrimEnd('/') == Ayarlar.VarsayilanSunucu;
+        _sunucuAyari.Text = varsayilan ? $"Sunucu: {Tema.UygulamaAdi} bulutu" : $"Sunucu: {uri.Authority}";
         PerformLayout();
     }
 
@@ -249,7 +251,7 @@ public class MarkaPaneli : Control
         // Logo
         var logo = new RectangleF(sol, Tema.S(48), Tema.S(44), Tema.S(44));
         Tema.Logo(g, logo);
-        TextRenderer.DrawText(g, "ekip", Tema.Yazi(16, kalin: true), new Point((int)logo.Right + Tema.S(12), (int)logo.Y + Tema.S(6)), Color.White);
+        TextRenderer.DrawText(g, Tema.UygulamaAdi, Tema.Yazi(16, kalin: true), new Point((int)logo.Right + Tema.S(12), (int)logo.Y + Tema.S(6)), Color.White);
 
         // Slogan
         int y = (int)(r.Height * 0.42);

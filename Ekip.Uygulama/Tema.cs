@@ -33,11 +33,15 @@ public static class Tema
 
     public static readonly System.Globalization.CultureInfo Turkce = new("tr-TR");
 
-    // Uygulama ikonu: Varliklar\ekip.ico (exe'nin içine gömülü). Windows ihtiyaç duyduğu boyutu kendisi seçer.
-    private static Icon? _ikon;
-    public static Icon Ikon => _ikon ??= new Icon(typeof(Tema).Assembly.GetManifestResourceStream("ekip.ico")!);
+    // Uygulamanın görünen adı. Her yerde bunu kullan (pencere başlığı, tepsi, bildirimler).
+    public const string UygulamaAdi = "31Hane";
 
-    // Logo işareti: konuşma balonu kuyruklu "e". Uygulama içindeki her yerde aynı çizim (256'lık ızgarada tasarlandı).
+    // Uygulama ikonu: Varliklar\31hane.ico (exe'nin içine gömülü). Windows ihtiyaç duyduğu boyutu kendisi seçer.
+    private static Icon? _ikon;
+    public static Icon Ikon => _ikon ??= new Icon(typeof(Tema).Assembly.GetManifestResourceStream("uygulama.ico")!);
+
+    // Logo: mor zemin üstünde beyaz ev, gövdesinde "31". Varliklar\logo-uret.ps1 ile birebir aynı (256'lık ızgara).
+    // Çok küçük çizimlerde (24 px altı) rakam okunmayacağı için kapı çizilir.
     public static void Logo(Graphics g, RectangleF r, bool zemin = true)
     {
         var eskiD = g.Transform;
@@ -45,18 +49,32 @@ public static class Tema
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TranslateTransform(r.X, r.Y);
         g.ScaleTransform(r.Width / 256f, r.Height / 256f);
+        var mor = ColorTranslator.FromHtml("#5B3BE8");
         if (zemin)
         {
             using var yol = YuvarlakDikdortgen(new RectangleF(0, 0, 256, 256), 56);
-            using var f = new LinearGradientBrush(new Rectangle(0, 0, 256, 256), ColorTranslator.FromHtml("#9277FF"), ColorTranslator.FromHtml("#5B3BE8"), 45f);
+            using var f = new LinearGradientBrush(new Rectangle(0, 0, 256, 256), ColorTranslator.FromHtml("#9277FF"), mor, 45f);
             g.FillPath(f, yol);
         }
-        const float cx = 132, cy = 122, R = 62;
-        using (var halka = new Pen(Color.White, 34) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            g.DrawArc(halka, cx - R, cy - R, R * 2, R * 2, 78, 318);
-        using (var cizgi = new Pen(Color.White, 30) { StartCap = LineCap.Flat, EndCap = LineCap.Round })
-            g.DrawLine(cizgi, cx - R + 2, cy, cx + R, cy);
-        g.FillPolygon(Brushes.White, new PointF[] { new(66, 150), new(46, 214), new(112, 184) });
+        using (var ev = new GraphicsPath())
+        {
+            ev.AddPolygon(new PointF[] { new(128, 42), new(228, 126), new(200, 126), new(200, 214), new(56, 214), new(56, 126), new(28, 126) });
+            g.FillPath(Brushes.White, ev);
+            using var kenar = new Pen(Color.White, 14) { LineJoin = LineJoin.Round };
+            g.DrawPath(kenar, ev);
+        }
+        g.FillRectangle(Brushes.White, 162, 60, 22, 50); // baca
+        // Zeminsiz çizimde (koyu arka plan) rakam/kapı arka plan rengini alsın diye de mor kalır.
+        using var b = new SolidBrush(mor);
+        if (r.Width >= 24)
+        {
+            using var yazi = new GraphicsPath();
+            using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            using var aile = new FontFamily("Segoe UI Black");
+            yazi.AddString("31", aile, 0, 98, new RectangleF(56, 122, 144, 96), sf);
+            g.FillPath(b, yazi);
+        }
+        else g.FillRectangle(b, 108, 158, 40, 56);
         g.Transform = eskiD;
         g.SmoothingMode = eskiS;
     }

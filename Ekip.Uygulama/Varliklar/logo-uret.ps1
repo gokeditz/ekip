@@ -1,10 +1,27 @@
 ﻿param([string]$Cikti)
+# 31Hane logosu: mor yuvarlak kare, icinde beyaz ev; evin govdesinde mor "31".
+# 24 pikselden kucuk boyutlarda rakam okunmaz: yerine kucuk bir kapi cizilir.
+# Uygulama icindeki cizim Tema.Logo ile ayni (256'lik izgara).
 Add-Type -AssemblyName System.Drawing
-# Logo: mor yuvarlak kare, iÃ§inde konuÅŸma balonu kuyruklu beyaz "e".
+
+function Ev {
+    $p = New-Object Drawing.Drawing2D.GraphicsPath
+    # Cati + govde tek parca: tepe (128,34), saçaklar govdeden tasar.
+    $p.AddPolygon([Drawing.PointF[]]@(
+        (New-Object Drawing.PointF 128, 42),
+        (New-Object Drawing.PointF 228, 126),
+        (New-Object Drawing.PointF 200, 126),
+        (New-Object Drawing.PointF 200, 214),
+        (New-Object Drawing.PointF 56, 214),
+        (New-Object Drawing.PointF 56, 126),
+        (New-Object Drawing.PointF 28, 126)))
+    return $p
+}
+
 function Ciz([int]$n) {
     $bmp = New-Object Drawing.Bitmap $n, $n
     $g = [Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = 'AntiAlias'; $g.PixelOffsetMode = 'HighQuality'
+    $g.SmoothingMode = 'AntiAlias'; $g.PixelOffsetMode = 'HighQuality'; $g.TextRenderingHint = 'AntiAliasGridFit'
     $k = $n / 256.0
     $g.ScaleTransform($k, $k)
 
@@ -14,25 +31,33 @@ function Ciz([int]$n) {
     $f = New-Object Drawing.Drawing2D.LinearGradientBrush((New-Object Drawing.Rectangle 0,0,256,256), [Drawing.ColorTranslator]::FromHtml('#9277FF'), [Drawing.ColorTranslator]::FromHtml('#5B3BE8'), 45)
     $g.FillPath($f, $yol)
 
-    $cx = 132; $cy = 122; $R = 62
-    $kalem = New-Object Drawing.Pen ([Drawing.Color]::White), 34
-    $kalem.StartCap = 'Round'; $kalem.EndCap = 'Round'
-    # "e" halkasÄ±: saÄŸ altta aÃ§Ä±k (20Â°-55Â° arasÄ± boÅŸ)
-    $g.DrawArc($kalem, $cx-$R, $cy-$R, $R*2, $R*2, 78, 318)
-    # orta Ã§izgi
-    $kalem2 = New-Object Drawing.Pen ([Drawing.Color]::White), 30
-    $kalem2.StartCap = 'Flat'; $kalem2.EndCap = 'Round'
-    $g.DrawLine($kalem2, $cx-$R+2, $cy, $cx+$R, $cy)
-    # konuÅŸma balonu kuyruÄŸu (sol alt)
-    $kuyruk = New-Object Drawing.Drawing2D.GraphicsPath
-    $kuyruk.AddPolygon([Drawing.PointF[]]@((New-Object Drawing.PointF 66,150), (New-Object Drawing.PointF 46,214), (New-Object Drawing.PointF 112,184)))
-    $g.FillPath([Drawing.Brushes]::White, $kuyruk)
+    # Ev (koseleri yumusatmak icin ayni renkte kalin kenar)
+    $ev = Ev
+    $g.FillPath([Drawing.Brushes]::White, $ev)
+    $kenar = New-Object Drawing.Pen ([Drawing.Color]::White), 14
+    $kenar.LineJoin = 'Round'
+    $g.DrawPath($kenar, $ev)
+    # Baca
+    $g.FillRectangle([Drawing.Brushes]::White, 162, 60, 22, 50)
+
+    $mor = New-Object Drawing.SolidBrush ([Drawing.ColorTranslator]::FromHtml('#5B3BE8'))
+    if ($n -ge 24) {
+        $yazi = New-Object Drawing.Drawing2D.GraphicsPath
+        $fam = New-Object Drawing.FontFamily 'Segoe UI Black'
+        $sf = New-Object Drawing.StringFormat; $sf.Alignment = 'Center'; $sf.LineAlignment = 'Center'
+        $yazi.AddString('31', $fam, 0, 98, (New-Object Drawing.RectangleF 56, 122, 144, 96), $sf)
+        $g.FillPath($mor, $yazi)
+    } else {
+        # Kucuk boyut: kapi
+        $g.FillRectangle($mor, 108, 158, 40, 56)
+    }
     $g.Dispose()
     return $bmp
 }
+
 New-Item -ItemType Directory -Force $Cikti | Out-Null
 (Ciz 256).Save("$Cikti\logo-256.png"); (Ciz 512).Save("$Cikti\logo-512.png")
-# .ico: 256 PNG olarak, küçükler klasik 32 bit BMP (her programın okuyabildiği biçim).
+# .ico: 256 PNG olarak, kucukler klasik 32 bit BMP (her programin okuyabildigi bicim).
 $boyutlar = 16, 20, 24, 32, 40, 48, 64, 256
 $veriler = @()
 foreach ($n in $boyutlar) {
@@ -55,5 +80,11 @@ for ($k = 0; $k -lt $boyutlar.Count; $k++) {
     $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]$veriler[$k].Length); $w.Write([uint32]$ofs); $ofs += $veriler[$k].Length
 }
 foreach ($v in $veriler) { $w.Write($v) }
-[IO.File]::WriteAllBytes("$Cikti\ekip.ico", $ico.ToArray())
+[IO.File]::WriteAllBytes("$Cikti\31hane.ico", $ico.ToArray())
+# Onizleme: tum boyutlar yan yana (kontrol icin)
+$on = New-Object Drawing.Bitmap 760, 300
+$og = [Drawing.Graphics]::FromImage($on); $og.Clear([Drawing.ColorTranslator]::FromHtml('#1E1F24'))
+$x = 10
+foreach ($n in 256, 64, 48, 32, 24, 20, 16) { $b = Ciz $n; $og.DrawImage($b, $x, 20, $n, $n); $x += $n + 20; $b.Dispose() }
+$og.Dispose(); $on.Save("$Cikti\onizleme.png")
 "ok"
