@@ -22,6 +22,12 @@ public sealed class Canli : IAsyncDisposable
     public event Action<PartiBilgisi?>? PartiGuncellendi;
     public event Action<PartiMesaji>? PartiMesajiGeldi;
     public event Action<string>? OturumSonlandi;
+    public event Action<Mesaj>? MesajGuncellendi;              // düzenlendi / silindi / tepki
+    public event Action<KonusmaKimligi, long>? KonusmaYaziyor;  // kanal/grupta (konuşma, kim)
+    public event Action<KonusmaKimligi>? KonusmaOkundu;        // kanal/grubu başka cihazımda okudum
+    public event Action? SunucularDegisti;
+    public event Action<long>? SunucuGuncellendi;
+    public event Action? GruplarDegisti;
 
     public bool Bagli => _baglanti.State == HubConnectionState.Connected;
 
@@ -43,6 +49,18 @@ public sealed class Canli : IAsyncDisposable
         _baglanti.On<PartiBilgisi?>(HubOlaylari.PartiGuncellendi, b => Ui(() => PartiGuncellendi?.Invoke(b)));
         _baglanti.On<PartiMesaji>(HubOlaylari.PartiMesaji, m => Ui(() => PartiMesajiGeldi?.Invoke(m)));
         _baglanti.On<string>(HubOlaylari.OturumSonlandi, s => Ui(() => OturumSonlandi?.Invoke(s)));
+        _baglanti.On<Mesaj>(HubOlaylari.MesajGuncellendi, m => Ui(() => MesajGuncellendi?.Invoke(m)));
+        _baglanti.On<string, long>(HubOlaylari.KonusmaYaziyor, (k, kim) =>
+        {
+            if (KonusmaKimligi.Coz(k) is { } kk) Ui(() => KonusmaYaziyor?.Invoke(kk, kim));
+        });
+        _baglanti.On<string>(HubOlaylari.KonusmaOkundu, k =>
+        {
+            if (KonusmaKimligi.Coz(k) is { } kk) Ui(() => KonusmaOkundu?.Invoke(kk));
+        });
+        _baglanti.On(HubOlaylari.SunucularDegisti, () => Ui(() => SunucularDegisti?.Invoke()));
+        _baglanti.On<long>(HubOlaylari.SunucuGuncellendi, id => Ui(() => SunucuGuncellendi?.Invoke(id)));
+        _baglanti.On(HubOlaylari.GruplarDegisti, () => Ui(() => GruplarDegisti?.Invoke()));
 
         _baglanti.Reconnecting += _ => { Ui(() => BaglantiDegisti?.Invoke(false)); return Task.CompletedTask; };
         _baglanti.Reconnected += _ =>
@@ -91,6 +109,13 @@ public sealed class Canli : IAsyncDisposable
     {
         try { if (Bagli) await _baglanti.InvokeAsync("Yaziyor", karsi); }
         catch { /* Önemsiz: gösterge gitmezse bir şey olmaz. */ }
+    }
+
+    // Kanal/grupta "yazıyor" (DM için YaziyorBildir).
+    public async Task KonusmaYaziyorBildir(KonusmaKimligi k)
+    {
+        try { if (Bagli) await _baglanti.InvokeAsync(HubMetotlari.KonusmaYaziyor, k.ToString()); }
+        catch { }
     }
 
     // ---- Parti ---- (bağlantı yoksa null/hata döner, arayüz bunu gösterir)
