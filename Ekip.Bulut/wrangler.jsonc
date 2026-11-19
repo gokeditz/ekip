@@ -13,8 +13,13 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EkipSunucu"] }],
 
+  // Dosyalar (fotoğraf, video, ...) R2 kovasında; baytlar Durable Object'e girmez.
+  "r2_buckets": [{ "binding": "DOSYALAR", "bucket_name": "ekip-dosyalar" }],
+
   "vars": {
     // IP başına dakikada giriş/kayıt denemesi.
-    "HESAP_LIMITI": "10"
+    "HESAP_LIMITI": "10",
+    // GIF sağlayıcısı: giphy | klipy | tenor. Anahtar gizli değişkendir: npx wrangler secret put GIF_ANAHTARI
+    "GIF_SAGLAYICI": "giphy"
   }
 }

@@ -9,7 +9,19 @@ export interface Profil {
   profilRengi: string; avatarSurum: number; durum: number;
 }
 
-export interface Mesaj { id: number; gonderenId: number; aliciId: number; metin: string; zaman: number; istemciId: string | null }
+export interface Ek {
+  tur: string; ad: string; mime: string; boyut: number; url: string; onizlemeUrl: string | null; genislik: number; yukseklik: number;
+}
+export interface Tepki { emoji: string; kullanicilar: number[] }
+export interface MesajOzeti { id: number; gonderenId: number; metin: string; ekVar: boolean; silindi: boolean }
+
+export interface Mesaj {
+  id: number; gonderenId: number; aliciId: number; metin: string; zaman: number; istemciId: string | null;
+  kanalId: number | null; grupId: number | null; yanitId: number | null; yanit: MesajOzeti | null;
+  ekler: Ek[]; tepkiler: Tepki[]; duzenlenme: number | null; silindi: boolean; bahsedilenler: number[];
+}
+
+export enum SunucuRolu { Uye = 0, Yonetici = 1, Sahip = 2 }
 
 export interface DavetKodu {
   kod: string; kalanKullanim: number; kullanan: number; olusturma: number; sonKullanma: number | null; olusturan: string; iptal: boolean;
@@ -30,6 +42,12 @@ export const HubOlaylari = {
   PartiGuncellendi: "PartiGuncellendi",
   PartiMesaji: "PartiMesaji",
   OturumSonlandi: "OturumSonlandi",
+  MesajGuncellendi: "MesajGuncellendi",
+  KonusmaYaziyor: "KonusmaYaziyor",
+  KonusmaOkundu: "KonusmaOkundu",
+  SunucularDegisti: "SunucularDegisti",
+  SunucuGuncellendi: "SunucuGuncellendi",
+  GruplarDegisti: "GruplarDegisti",
 } as const;
 
 export const Kurallar = {
@@ -45,6 +63,19 @@ export const Kurallar = {
   MesajSayfasi: 50,
   PartiMesajMax: 300,
   PartiUyeMax: 10,
+  MesajEkMax: 10,
+  DosyaMaxBayt: 95 * 1024 * 1024,
+  GunlukYuklemeBayt: 1024 * 1024 * 1024,
+  DosyaSaklamaGun: 90,
+  TepkiMax: 20,
+  SunucuAdMax: 40,
+  SunucuAciklamaMax: 300,
+  KanalAdMax: 32,
+  KanalKonuMax: 120,
+  SunucuKanalMax: 50,
+  SunucuMax: 30,
+  GrupUyeMax: 10,
+  GrupAdMax: 40,
   ProfilRenkleri: ["#7C5CFF", "#3DA9FC", "#2CB67D", "#F59E0B", "#EF4565", "#E862C9", "#14B8A6", "#F97316", "#64748B"],
 };
 
@@ -84,4 +115,26 @@ export function profilKontrol(p: ProfilGuncelleme): string | null {
 export function kodDuzelt(kod: unknown): string {
   const s = (typeof kod === "string" ? kod : "").toUpperCase().replace(/[^\p{L}\p{N}]/gu, "");
   return s.length === 8 ? s.slice(0, 4) + "-" + s.slice(4) : s;
+}
+
+// Kanal adı: küçük harf, rakam, - ve _ (Ekip.Ortak Kurallar.KanalAdKontrol ile aynı).
+export function kanalAdKontrol(ad: unknown): string | null {
+  if (bosMu(ad)) return "Kanal adı boş olamaz.";
+  const s = (ad as string).trim();
+  if (s.length > Kurallar.KanalAdMax) return `Kanal adı en fazla ${Kurallar.KanalAdMax} karakter olabilir.`;
+  for (const c of s)
+    if (!((/[\p{L}\p{N}]/u.test(c) && !/\p{Lu}/u.test(c)) || c === "-" || c === "_")) return "Kanal adında küçük harf, rakam, - ve _ olabilir.";
+  return null;
+}
+
+export const renkGecerli = (r: unknown): boolean => typeof r === "string" && Kurallar.ProfilRenkleri.includes(r);
+
+// GIF sağlayıcılarının izinli alan adları (ek doğrulaması).
+export function gifAdresiIzinli(adres: string): boolean {
+  let u: URL;
+  try { u = new URL(adres); } catch { return false; }
+  if (u.protocol !== "https:") return false;
+  const h = u.hostname.toLowerCase();
+  return h === "giphy.com" || h.endsWith(".giphy.com") || h === "klipy.com" || h.endsWith(".klipy.com") ||
+    h === "tenor.com" || h.endsWith(".tenor.com");
 }

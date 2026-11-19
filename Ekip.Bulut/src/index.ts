@@ -6,21 +6,36 @@
 // parçacığında çalışır (kilit gerekmez). Bağlantılar "hibernation" ile tutulur: kimse bir şey yazmazken nesne
 // uyur, ücret/kota harcanmaz; mesaj gelince uyanır.
 import { DurableObject } from "cloudflare:workers";
+import { DosyaDeposu, dosyaIndir, dosyaYukle } from "./dosyalar";
+import { gifAra } from "./gif";
+import { GrupRotalari } from "./gruplar";
+import { KesfetRotalari } from "./kesfet";
 import {
-  Durum, HubOlaylari, Kurallar, Profil, ProfilGuncelleme,
+  Durum, Ek as DosyaEki, HubOlaylari, Kurallar, Profil, ProfilGuncelleme,
   gorunenAdKontrol, kullaniciAdiKontrol, profilKontrol, sifreKontrol,
 } from "./kurallar";
+import { MesajRotalari, MesajDeposu } from "./mesajlar";
+import { Baglam, Govde, HttpHata, Kimlik, bos, hata, json, resimTuru, sayi, tamam } from "./ortak";
 import { PartiYoneticisi } from "./parti";
+import { SunucuRotalari } from "./sunucular";
 import { Iliski, Veritabani } from "./veritabani";
 
 export interface Env {
   EKIP: DurableObjectNamespace<EkipSunucu>;
+  DOSYALAR: R2Bucket;          // Yüklenen dosyalar (R2); baytlar Durable Object'e girmez
   HESAP_LIMITI?: string;
+  GIF_SAGLAYICI?: string;      // giphy | klipy | tenor (varsayılan giphy)
+  GIF_ANAHTARI?: string;       // gizli değişken: npx wrangler secret put GIF_ANAHTARI
 }
 
-// Giriş noktası: her isteği tek sunucu nesnesine iletir.
+// Giriş noktası. Dosya yükleme/indirme ve GIF aracılığı burada (Worker'da) yapılır, Durable Object yorulmaz;
+// geri kalan her şey tek sunucu nesnesine gider.
 export default {
-  async fetch(istek: Request, env: Env): Promise<Response> {
+  async fetch(istek: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const yol = new URL(istek.url).pathname;
+    if (yol === "/api/dosya" && istek.method === "POST") return dosyaYukle(istek, env);
+    if (yol.startsWith("/dosya/") && (istek.method === "GET" || istek.method === "HEAD")) return dosyaIndir(istek, env, yol);
+    if (yol === "/api/gif" && istek.method === "GET") return gifAra(istek, env, ctx);
     return env.EKIP.get(env.EKIP.idFromName("ana")).fetch(istek);
   },
 } satisfies ExportedHandler<Env>;
@@ -29,31 +44,34 @@ const RS = "\x1e"; // SignalR mesaj ayırıcı
 const PING = '{"type":6}' + RS;
 
 interface Ek { uid: number; el: boolean } // Bağlantıya iliştirilen bilgi (uykudan sonra da kalır). el: el sıkışma bitti mi
-interface Kimlik { id: number; admin: boolean }
-type Govde = Record<string, unknown>;
-
-class HttpHata { constructor(public durum: number, public mesaj?: string, public alan?: string) {} }
-
-const json = (veri: unknown, durum = 200) =>
-  new Response(JSON.stringify(veri), { status: durum, headers: { "Content-Type": "application/json; charset=utf-8" } });
-const hata = (durum: number, mesaj: string, alan?: string) => json({ mesaj, alan: alan ?? null }, durum);
-const tamam = () => new Response(null, { status: 200 });
-const bos = (durum: number) => new Response(null, { status: durum });
-
-function resimTuru(v: Uint8Array): string | null {
-  if (v.length > 8 && v[0] === 0x89 && v[1] === 0x50 && v[2] === 0x4e && v[3] === 0x47) return "image/png";
-  if (v.length > 3 && v[0] === 0xff && v[1] === 0xd8 && v[2] === 0xff) return "image/jpeg";
-  return null;
-}
 
 export class EkipSunucu extends DurableObject<Env> {
   private readonly db: Veritabani;
   private readonly parti: PartiYoneticisi;
   private readonly limitler = new Map<string, { bas: number; n: number }>();
+  private readonly mesajlar: MesajRotalari;
+  private readonly sunucular: SunucuRotalari;
+  private readonly gruplar: GrupRotalari;
+  private readonly kesfet: KesfetRotalari;
+  private readonly dosyalar: DosyaDeposu;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.db = new Veritabani(ctx.storage.sql, f => ctx.storage.transactionSync(f));
+    const baglam: Baglam = {
+      db: this.db,
+      gonder: (k, o, ...a) => this.gonder(k, o, ...a),
+      cevrimici: id => this.cevrimici(id),
+      baskasina: p => this.baskasina(p),
+      sinir: (a, i, p) => this.sinir(a, i, p),
+      govde: i => this.govde(i),
+    };
+    const mesajDeposu = new MesajDeposu(this.db);
+    this.mesajlar = new MesajRotalari(baglam, mesajDeposu);
+    this.sunucular = new SunucuRotalari(baglam, mesajDeposu);
+    this.gruplar = new GrupRotalari(baglam, mesajDeposu);
+    this.kesfet = new KesfetRotalari(baglam);
+    this.dosyalar = new DosyaDeposu(this.db.s);
     this.parti = new PartiYoneticisi(ctx.storage.sql, this.db, id => this.cevrimici(id), p => this.baskasina(p));
     // Kimse bağlı değilse (ilk açılış ya da yeniden başlatma) eski partiler geçersizdir.
     if (ctx.getWebSockets().length === 0) this.parti.hepsiniSil();
@@ -85,12 +103,12 @@ export class EkipSunucu extends DurableObject<Env> {
       for (const ws of this.soketler(uid)) { try { ws.send(cerceve); } catch { /* kapanıyor */ } }
   }
 
-  private durumYay(id: number, durum: number) { this.gonder(this.db.arkadasIdleri(id), HubOlaylari.DurumDegisti, id, durum); }
+  private durumYay(id: number, durum: number) { this.gonder(this.db.gorenler(id), HubOlaylari.DurumDegisti, id, durum); }
 
   private profilDegisti(id: number) {
     const p = this.db.profilGetir(id);
     if (!p) return;
-    this.gonder(this.db.arkadasIdleri(id), HubOlaylari.ProfilDegisti, this.baskasina(p));
+    this.gonder(this.db.gorenler(id), HubOlaylari.ProfilDegisti, this.baskasina(p));
     this.gonder([id], HubOlaylari.ProfilDegisti, p);
   }
 
@@ -130,11 +148,22 @@ export class EkipSunucu extends DurableObject<Env> {
     return null;
   }
 
-  private async kimlik(istek: Request, url: URL): Promise<Kimlik | null> {
+  private async kimlikIstekten(istek: Request, url: URL): Promise<Kimlik | null> {
     const t = this.tokenAl(istek, url);
-    if (!t) return null;
-    const o = await this.db.oturumdanKullanici(t);
+    return t ? this.kimlik(t) : null;
+  }
+
+  // ---- RPC (Worker'dan çağrılır; dosya baytları buraya hiç gelmez) ----
+
+  async kimlik(token: string): Promise<Kimlik | null> {
+    const o = await this.db.oturumdanKullanici(token);
     return o ? { id: o.kullanici.id, admin: o.admin } : null;
+  }
+
+  async dosyaKotasi(uid: number, boyut: number): Promise<boolean> { return this.dosyalar.kotaVar(uid, boyut); }
+
+  async dosyaKaydet(uid: number, anahtar: string, ad: string, mime: string, boyut: number): Promise<DosyaEki> {
+    return this.dosyalar.kaydet(uid, anahtar, ad, mime, boyut);
   }
 
   private async govde(istek: Request): Promise<Govde> {
@@ -159,7 +188,7 @@ export class EkipSunucu extends DurableObject<Env> {
     }
 
     // Buradan sonrası oturum ister.
-    const ben = await this.kimlik(istek, url);
+    const ben = await this.kimlikIstekten(istek, url);
 
     if (y === "/hub/negotiate" && m === "POST") {
       if (!ben) return bos(401);
@@ -181,10 +210,6 @@ export class EkipSunucu extends DurableObject<Env> {
     if (!y.startsWith("/api/")) return bos(404);
     if (!ben) return bos(401);
     const p = y.split("/").slice(2); // "/api/a/b" -> ["a","b"]
-    const sayi = (s: string | undefined): number => {
-      if (!s || !/^\d{1,15}$/.test(s)) throw new HttpHata(404);
-      return Number(s);
-    };
 
     if (p[0] === "cikis" && p.length === 1 && m === "POST") {
       await this.db.oturumKapat(this.tokenAl(istek, url)!);
@@ -254,38 +279,12 @@ export class EkipSunucu extends DurableObject<Env> {
       }
     }
 
-    // ---- Mesajlar ----
-    if (p[0] === "sohbetler" && p.length === 1 && m === "GET")
-      return json(this.db.sohbetOzetleri(ben.id).map(s => ({ karsi: this.baskasina(s.karsi), sonMesaj: s.son, okunmamis: s.okunmamis })));
-
-    if (p[0] === "mesajlar" && p.length >= 2) {
-      const id = sayi(p[1]);
-      const arkadasDegil = () => hata(403, "Sadece arkadaşlarınla mesajlaşabilirsin.");
-      if (p.length === 2 && m === "GET") {
-        const o = url.searchParams.get("once");
-        if (o !== null && !/^-?\d{1,18}$/.test(o)) return bos(400);
-        if (this.db.iliskiGetir(ben.id, id) !== Iliski.Arkadas) return arkadasDegil();
-        return json(this.db.mesajlar(ben.id, id, o === null ? null : Number(o), Kurallar.MesajSayfasi));
-      }
-      if (p.length === 2 && m === "POST") {
-        if (!this.sinir("m:" + ben.id, 20, 10_000)) return bos(429);
-        const i = await this.govde(istek);
-        const metin = (typeof i.metin === "string" ? i.metin : "").trim();
-        if (metin.length === 0) return hata(400, "Boş mesaj gönderilemez.");
-        if (metin.length > Kurallar.MesajMax) return hata(400, `Mesaj en fazla ${Kurallar.MesajMax} karakter olabilir.`);
-        if (this.db.iliskiGetir(ben.id, id) !== Iliski.Arkadas) return arkadasDegil();
-        const mesaj = this.db.mesajEkle(ben.id, id, metin);
-        mesaj.istemciId = typeof i.istemciId === "string" && i.istemciId.length <= 64 ? i.istemciId : null;
-        this.gonder([mesaj.gonderenId, mesaj.aliciId], HubOlaylari.MesajGeldi, mesaj); // Alıcıya ve diğer cihazlarıma.
-        return json(mesaj);
-      }
-      if (p.length === 3 && p[2] === "okundu" && m === "POST") {
-        if (this.db.okunduIsaretle(ben.id, id) > 0) this.gonder([ben.id], HubOlaylari.SohbetOkundu, id);
-        return tamam();
-      }
-    }
-
-    return bos(404);
+    // ---- Mesajlar, sunucular, gruplar, keşfet ----
+    return await this.mesajlar.yonlendir(istek, url, p, m, ben.id)
+      ?? await this.sunucular.yonlendir(istek, p, m, ben.id)
+      ?? await this.gruplar.yonlendir(istek, p, m, ben.id)
+      ?? await this.kesfet.yonlendir(p, m, ben.id, url.searchParams.get("q") ?? "")
+      ?? bos(404);
   }
 
   private async kayit(i: Govde): Promise<Response> {
@@ -307,10 +306,18 @@ export class EkipSunucu extends DurableObject<Env> {
   }
 
   private istekGonder(ben: number, i: Govde): Response {
+    // Kimlik (Keşfet'ten) doluysa o; yoksa kullanıcı adı. "#12" ya da "12" numara olarak da aranır.
     const ad = (typeof i.kullaniciAdi === "string" ? i.kullaniciAdi : "").trim().replace(/^@+/, "");
-    if (ad.length === 0) return hata(400, "Bir kullanıcı adı yaz.");
-    const o = this.db.kullaniciIdBul(ad);
-    if (o === null) return hata(404, `"${ad}" adında biri yok. Yazımı kontrol et.`);
+    const kimlikle = typeof i.id === "number" && Number.isInteger(i.id) ? i.id : null;
+    if (ad.length === 0 && kimlikle === null) return hata(400, "Bir kullanıcı adı ya da #numara yaz.");
+    let o: number | null;
+    if (kimlikle !== null) o = this.db.kullaniciVarMi(kimlikle) ? kimlikle : null;
+    else {
+      o = /^#\d{1,15}$/.test(ad) ? null : this.db.kullaniciIdBul(ad);
+      const numara = /^#?(\d{1,15})$/.exec(ad);
+      if (o === null && numara && this.db.kullaniciVarMi(Number(numara[1]))) o = Number(numara[1]);
+    }
+    if (o === null) return hata(404, `"${ad || kimlikle}" adında biri yok. Yazımı kontrol et.`);
     if (o === ben) return hata(400, "Kendine istek gönderemezsin 🙂");
     switch (this.db.iliskiGetir(ben, o)) {
       case Iliski.Arkadas: return hata(409, "Zaten arkadaşsınız.");
@@ -468,6 +475,7 @@ export class EkipSunucu extends DurableObject<Env> {
         this.gonder([ben], HubOlaylari.DurumDegisti, ben, d); // Diğer cihazlarım da bilsin.
         return undefined;
       }
+      case "KonusmaYaziyor": this.mesajlar.konusmaYaziyor(ben, yaziArg(a[0])); return undefined;
       case "Yaziyor": {
         const karsi = sayiArg(a[0]);
         if (this.db.iliskiGetir(ben, karsi) === Iliski.Arkadas) this.gonder([karsi], HubOlaylari.Yaziyor, ben);

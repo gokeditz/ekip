@@ -1,7 +1,7 @@
 // Ekip.Sunucu/Veritabani.cs'in karşılığı. Durable Object'in içindeki SQLite kullanılır (senkron, tek iş parçacığı).
-import { DavetKodu, KullaniciBilgisi, Mesaj, Profil, ProfilGuncelleme, kodDuzelt } from "./kurallar";
+import { DavetKodu, KullaniciBilgisi, Profil, ProfilGuncelleme, kodDuzelt } from "./kurallar";
+import { Sql, simdiSn, type Satir } from "./sql";
 
-type Satir = Record<string, SqlStorageValue>;
 
 export enum Iliski { Yok, Arkadas, BenGonderdim, OGonderdi }
 
@@ -20,23 +20,93 @@ function profilOku(r: Satir): Profil {
   };
 }
 
-function mesajOku(r: Satir, on = ""): Mesaj {
-  return {
-    id: r[on + "id"] as number, gonderenId: r[on + "gonderen_id"] as number, aliciId: r[on + "alici_id"] as number,
-    metin: r[on + "metin"] as string, zaman: r[on + "zaman"] as number, istemciId: null,
-  };
-}
-
-const simdiSn = () => Math.floor(Date.now() / 1000);
+export { profilOku, PROFIL_SUTUNLARI, KOD_ALFABESI };
 
 export class Veritabani {
+  // Diğer modüller (mesajlar, sunucular, gruplar) aynı SQL yardımcısını kullanır.
+  readonly s: Sql;
+
   constructor(private readonly sql: SqlStorage, private readonly islem: <T>(f: () => T) => T) {
+    this.s = new Sql(sql, islem);
     this.tablolariOlustur();
+    this.gecis();
   }
 
-  private hepsi(q: string, ...p: SqlStorageValue[]): Satir[] { return this.sql.exec(q, ...p).toArray() as Satir[]; }
-  private bir(q: string, ...p: SqlStorageValue[]): Satir | null { return this.hepsi(q, ...p)[0] ?? null; }
-  private calistir(q: string, ...p: SqlStorageValue[]): number { return this.sql.exec(q, ...p).rowsWritten; }
+  private hepsi(q: string, ...p: SqlStorageValue[]): Satir[] { return this.s.hepsi(q, ...p); }
+  private bir(q: string, ...p: SqlStorageValue[]): Satir | null { return this.s.bir(q, ...p); }
+  private calistir(q: string, ...p: SqlStorageValue[]): number { return this.s.calistir(q, ...p); }
+
+  // Şema sürümü geçişleri (yalnızca ekleme; canlı veri silinmez). Sürüm `ayar.surum` içinde.
+  private gecis() {
+    const surum = Number(this.bir("SELECT deger FROM ayar WHERE ad = 'surum'")?.deger ?? "4");
+    if (surum < 5) this.islem(() => { this.surum5(); this.calistir("UPDATE ayar SET deger = '5' WHERE ad = 'surum'"); });
+  }
+
+  // v5: kanal/grup mesajları, ekler, tepkiler, sunucular, gruplar, dosyalar.
+  // mesajlar tablosu yeniden kurulur: alici_id artık kullanıcıya bağlı olmak zorunda değil (kanal/grup mesajında 0).
+  private surum5() {
+    const e = (q: string) => this.sql.exec(q);
+    e(`CREATE TABLE mesajlar_yeni (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        gonderen_id INTEGER NOT NULL,
+        alici_id    INTEGER NOT NULL,
+        metin       TEXT    NOT NULL,
+        zaman       INTEGER NOT NULL,
+        okundu      INTEGER NOT NULL DEFAULT 0,
+        kanal_id    INTEGER,
+        grup_id     INTEGER,
+        yanit_id    INTEGER,
+        ekler       TEXT,
+        duzenlenme  INTEGER,
+        silindi     INTEGER NOT NULL DEFAULT 0
+      )`);
+    e("INSERT INTO mesajlar_yeni (id, gonderen_id, alici_id, metin, zaman, okundu) SELECT id, gonderen_id, alici_id, metin, zaman, okundu FROM mesajlar");
+    e("DROP TABLE mesajlar");
+    e("ALTER TABLE mesajlar_yeni RENAME TO mesajlar");
+    e("CREATE INDEX mesajlar_cift ON mesajlar(gonderen_id, alici_id, id)");
+    e("CREATE INDEX mesajlar_okunmamis ON mesajlar(alici_id, okundu)");
+    e("CREATE INDEX mesajlar_kanal ON mesajlar(kanal_id, id)");
+    e("CREATE INDEX mesajlar_grup ON mesajlar(grup_id, id)");
+    e("CREATE TABLE IF NOT EXISTS tepkiler (mesaj_id INTEGER NOT NULL, kullanici_id INTEGER NOT NULL, emoji TEXT NOT NULL, zaman INTEGER NOT NULL, PRIMARY KEY (mesaj_id, kullanici_id, emoji))");
+    e("CREATE TABLE IF NOT EXISTS bahsetmeler (mesaj_id INTEGER NOT NULL, kullanici_id INTEGER NOT NULL, PRIMARY KEY (mesaj_id, kullanici_id))");
+    e("CREATE INDEX IF NOT EXISTS bahsetmeler_kullanici ON bahsetmeler(kullanici_id, mesaj_id)");
+    e("CREATE TABLE IF NOT EXISTS okumalar (kullanici_id INTEGER NOT NULL, konusma TEXT NOT NULL, son_id INTEGER NOT NULL, PRIMARY KEY (kullanici_id, konusma))");
+    e(`CREATE TABLE IF NOT EXISTS sunucular (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ad TEXT NOT NULL, aciklama TEXT NOT NULL DEFAULT '', renk TEXT NOT NULL,
+        ikon BLOB, ikon_surum INTEGER NOT NULL DEFAULT 0, herkese INTEGER NOT NULL DEFAULT 0, sahip_id INTEGER NOT NULL,
+        davet_kodu TEXT NOT NULL UNIQUE, olusturma INTEGER NOT NULL)`);
+    e(`CREATE TABLE IF NOT EXISTS sunucu_uyeleri (
+        sunucu_id INTEGER NOT NULL, kullanici_id INTEGER NOT NULL, rol INTEGER NOT NULL DEFAULT 0, katilma INTEGER NOT NULL,
+        PRIMARY KEY (sunucu_id, kullanici_id))`);
+    e("CREATE INDEX IF NOT EXISTS sunucu_uyeleri_kullanici ON sunucu_uyeleri(kullanici_id)");
+    e(`CREATE TABLE IF NOT EXISTS kanallar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, sunucu_id INTEGER NOT NULL, ad TEXT NOT NULL, konu TEXT NOT NULL DEFAULT '',
+        sira INTEGER NOT NULL DEFAULT 0, olusturma INTEGER NOT NULL)`);
+    e("CREATE INDEX IF NOT EXISTS kanallar_sunucu ON kanallar(sunucu_id, sira)");
+    e(`CREATE TABLE IF NOT EXISTS gruplar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ad TEXT NOT NULL, aciklama TEXT NOT NULL DEFAULT '', renk TEXT NOT NULL,
+        ikon BLOB, ikon_surum INTEGER NOT NULL DEFAULT 0, kurucu_id INTEGER NOT NULL, olusturma INTEGER NOT NULL)`);
+    e(`CREATE TABLE IF NOT EXISTS grup_uyeleri (
+        grup_id INTEGER NOT NULL, kullanici_id INTEGER NOT NULL, katilma INTEGER NOT NULL, PRIMARY KEY (grup_id, kullanici_id))`);
+    e("CREATE INDEX IF NOT EXISTS grup_uyeleri_kullanici ON grup_uyeleri(kullanici_id)");
+    e(`CREATE TABLE IF NOT EXISTS dosyalar (
+        anahtar TEXT PRIMARY KEY, sahip_id INTEGER NOT NULL, ad TEXT NOT NULL, mime TEXT NOT NULL, boyut INTEGER NOT NULL, zaman INTEGER NOT NULL)`);
+    e("CREATE INDEX IF NOT EXISTS dosyalar_sahip ON dosyalar(sahip_id, zaman)");
+  }
+
+  // Beni görebilecek kişiler: arkadaşlarım + ortak sunucudakiler + ortak gruptakiler (durum/profil değişimi buraya gider).
+  gorenler(ben: number): number[] {
+    return this.hepsi(`
+      SELECT CASE WHEN gonderen_id = ?1 THEN alici_id ELSE gonderen_id END AS id
+        FROM arkadaslik WHERE durum = 1 AND (gonderen_id = ?1 OR alici_id = ?1)
+      UNION SELECT b.kullanici_id FROM sunucu_uyeleri a JOIN sunucu_uyeleri b ON b.sunucu_id = a.sunucu_id
+        WHERE a.kullanici_id = ?1 AND b.kullanici_id != ?1
+      UNION SELECT b.kullanici_id FROM grup_uyeleri a JOIN grup_uyeleri b ON b.grup_id = a.grup_id
+        WHERE a.kullanici_id = ?1 AND b.kullanici_id != ?1`, ben).map(r => r.id as number);
+  }
+
+  // Keşfet'te ve kimlikle istek atarken: numarayla kullanıcı (yasaklı değilse).
+  kullaniciVarMi(id: number): boolean { return this.bir("SELECT 1 FROM kullanicilar WHERE id = ? AND yasakli = 0", id) !== null; }
 
   private tablolariOlustur() {
     this.sql.exec(`
@@ -177,43 +247,6 @@ export class Veritabani {
   yasakAyarla(id: number, yasakli: boolean) {
     this.calistir("UPDATE kullanicilar SET yasakli = ? WHERE id = ?", yasakli ? 1 : 0, id);
     if (yasakli) this.calistir("DELETE FROM oturumlar WHERE kullanici_id = ?", id);
-  }
-
-  // ---- Mesajlar ----
-
-  mesajEkle(gonderen: number, alici: number, metin: string): Mesaj {
-    const zaman = Date.now();
-    const r = this.bir("INSERT INTO mesajlar (gonderen_id, alici_id, metin, zaman) VALUES (?, ?, ?, ?) RETURNING id", gonderen, alici, metin, zaman)!;
-    return { id: r.id as number, gonderenId: gonderen, aliciId: alici, metin, zaman, istemciId: null };
-  }
-
-  // En yeni "adet" mesaj (once verilirse ondan eskiler), eskiden yeniye sıralı.
-  mesajlar(ben: number, karsi: number, once: number | null, adet: number): Mesaj[] {
-    return this.hepsi(`
-      SELECT id, gonderen_id, alici_id, metin, zaman FROM mesajlar
-      WHERE ((gonderen_id = ?1 AND alici_id = ?2) OR (gonderen_id = ?2 AND alici_id = ?1)) AND id < ?3
-      ORDER BY id DESC LIMIT ?4`, ben, karsi, once ?? Number.MAX_SAFE_INTEGER, adet).map(r => mesajOku(r)).reverse();
-  }
-
-  okunduIsaretle(ben: number, karsi: number): number {
-    return this.calistir("UPDATE mesajlar SET okundu = 1 WHERE gonderen_id = ? AND alici_id = ? AND okundu = 0", karsi, ben);
-  }
-
-  // Arkadaşlarımla olan sohbetler: son mesaj ve okunmamış sayısı, en yeni sohbet üstte.
-  sohbetOzetleri(ben: number): { karsi: Profil; son: Mesaj; okunmamis: number }[] {
-    return this.hepsi(`
-      WITH konusmalar AS (
-        SELECT CASE WHEN gonderen_id = ?1 THEN alici_id ELSE gonderen_id END AS karsi, MAX(id) AS son_id
-        FROM mesajlar WHERE gonderen_id = ?1 OR alici_id = ?1
-        GROUP BY karsi
-      )
-      SELECT ${PROFIL_SUTUNLARI}, m.id AS m_id, m.gonderen_id AS m_gonderen_id, m.alici_id AS m_alici_id, m.metin AS m_metin, m.zaman AS m_zaman,
-             (SELECT COUNT(*) FROM mesajlar x WHERE x.gonderen_id = k.karsi AND x.alici_id = ?1 AND x.okundu = 0) AS okunmamis
-      FROM konusmalar k
-      JOIN mesajlar m ON m.id = k.son_id
-      JOIN kullanicilar u ON u.id = k.karsi
-      JOIN arkadaslik a ON a.durum = 1 AND ((a.gonderen_id = ?1 AND a.alici_id = k.karsi) OR (a.gonderen_id = k.karsi AND a.alici_id = ?1))
-      ORDER BY m.id DESC`, ben).map(r => ({ karsi: profilOku(r), son: mesajOku(r, "m_"), okunmamis: r.okunmamis as number }));
   }
 
   // ---- Profil ----
