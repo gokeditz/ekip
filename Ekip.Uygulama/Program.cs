@@ -15,6 +15,7 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Tema.OlcekBelirle();
+        _ = Task.Run(EmojiVeri.Hazirla);
         Application.ThreadException += (_, e) =>
         {
             try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "ekip-hata.log"), $"{DateTime.Now:HH:mm:ss} {e.Exception}\n"); } catch { }

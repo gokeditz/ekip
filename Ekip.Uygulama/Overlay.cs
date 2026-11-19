@@ -193,8 +193,8 @@ public class OverlayFormu : Form
     private readonly Label _arkadasBaslik = new() { AutoSize = true, Font = Tema.Yazi(8.5f, kalin: true), ForeColor = Tema.MetinIkincil, BackColor = Tema.Arkaplan };
     private readonly ArkadasListe _arkadaslar = new();
     private readonly OverlaySekmeler _sekmeler = new();
-    private readonly SohbetPaneli _dm = new();
-    private readonly SohbetPaneli _parti = new() { Ipucu = "Partiye yaz, Enter ile gönder", BaslikGizli = true };
+    private readonly SohbetPaneli _dm = new() { BasitMod = true };
+    private readonly SohbetPaneli _parti = new() { Ipucu = "Partiye yaz, Enter ile gönder", BaslikGizli = true, BasitMod = true };
     private readonly BosDurum _bos = new() { Glif = Uygulama.Glif.Mesaj, Baslik = "Bir sohbet seç", Aciklama = "Soldan bir arkadaşına tıkla ya da parti kurup arkadaşlarını davet et." };
     private readonly System.Windows.Forms.Timer _saat = new() { Interval = 20000 };
 
@@ -206,9 +206,7 @@ public class OverlayFormu : Form
 
     public event Action? KapatIstendi;
     public event Action<long>? DmSecildi;
-    public event Action<long, string>? DmGonder;
     public event Action<string>? PartiGonder;
-    public event Action<long>? DmEskiIste;
     public event Action<Profil>? Davet;
     public event Action? PartiKur;
     public event Action? PartidenAyril;
@@ -248,8 +246,6 @@ public class OverlayFormu : Form
         _partiKarti.Ayril += () => PartidenAyril?.Invoke();
         _sekmeler.Secildi += s => { Secili = s; SekmeyiGoster(); };
         _sekmeler.SabitleTik += () => SabitleTik?.Invoke();
-        _dm.Gonder += metin => { if (DmKisi != null) DmGonder?.Invoke(DmKisi.Id, metin); };
-        _dm.EskiIste += () => { if (DmKisi != null) DmEskiIste?.Invoke(DmKisi.Id); };
         _parti.Gonder += metin => PartiGonder?.Invoke(metin);
         _saat.Tick += (_, _) => _ust.Invalidate();
     }
@@ -309,17 +305,24 @@ public class OverlayFormu : Form
         _dm.Odaklan();
     }
 
-    public void DmGoster(Profil ben, Profil kisi, SohbetVerisi v, HashSet<string> basarisiz)
+    // DM sohbeti depodan çizilir (SohbetDeposu): yükleme, gönderme, okundu hep depoda.
+    public SohbetDeposu? Depo { set => _dm.Depo = value; }
+    public Api? Api { set => _dm.Api = value; }
+
+    public void DmGoster(Profil ben, Profil kisi)
     {
         if (DmKisi?.Id != kisi.Id) return;
         DmKisi = kisi;
-        _dm.Goster(ben, kisi, v, basarisiz);
+        _dm.Ben = ben;
+        var k = new KonusmaKimligi(KonusmaTuru.Dm, kisi.Id);
+        if (_dm.Kimlik == k) _dm.BasligiGuncelle(SohbetBasligi.Dm(kisi));
+        else _dm.Ac(k, SohbetBasligi.Dm(kisi));
     }
 
     public void PartiSohbetiGoster(Profil ben, Profil baslik, SohbetVerisi v, Func<long, Profil?> cozucu)
     {
         _parti.Cozucu = cozucu;
-        _parti.Goster(ben, baslik, v, []);
+        _parti.Goster(ben, SohbetBasligi.Dm(baslik), v);
     }
 
     public void PartiAlta() => _parti.Alta();

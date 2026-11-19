@@ -159,7 +159,7 @@ public partial class AnaForm
             _mini.EnUsteGetir();
             _miniIzleyici = new OnPencereIzleyici();
             _miniIzleyici.Degisti += h => { if (!OverlayAcik) MiniGorunurluk(h); };
-            if (dm is { } d) _ = OkunduYap(d); // Sabitlenen DM artık gözünün önünde.
+            if (dm is { } d) { _ = _depo.Ac(Dm(d)); _depo.GoruntuleniyorsaOkundu(Dm(d)); } // Sabitlenen DM artık gözünün önünde.
         }
         _overlay.SabitDurumunuYenile();
     }
@@ -213,7 +213,7 @@ public partial class AnaForm
         Pencereler.OneGetir(_mini.Handle);
         _mini.Activate();
         _mini.YaziKutusunaOdaklan();
-        if (!_miniParti && _miniDm is { } d) _ = OkunduYap(d);
+        if (!_miniParti && _miniDm is { } d) _depo.GoruntuleniyorsaOkundu(Dm(d));
     }
 
     private void MiniYazmaKapat(bool oyunaDon)
@@ -251,10 +251,10 @@ public partial class AnaForm
         {
             var kisi = _liste.Arkadaslar.FirstOrDefault(p => p.Id == id);
             if (kisi is null) { MiniKapat(); _overlay?.SabitDurumunuYenile(); return; }
-            var satirlar = Veri(id).Liste.TakeLast(100).Select(m =>
+            var satirlar = _depo.Veri(Dm(id)).Liste.TakeLast(100).Select(m =>
             {
                 var p = m.GonderenId == _ben.Id ? _ben : kisi;
-                return new MiniSohbet.Satir(p.GorunenAd, ColorTranslator.FromHtml(p.ProfilRengi), m.Metin, m.Zaman);
+                return new MiniSohbet.Satir(p.GorunenAd, ColorTranslator.FromHtml(p.ProfilRengi), MesajYardimci.KisaMetin(m), m.Zaman);
             }).ToList();
             _mini.Ayarla(kisi.GorunenAd, satirlar);
         }
@@ -324,7 +324,7 @@ public partial class AnaForm
         {
             _perde = new OverlayPerdesi();
             _perde.Tiklandi += OverlayKapat;
-            _overlay = new OverlayFormu { Avatarlar = _avatarlar, Owner = _perde, TusYazisi = _overlayTusu.ToString() };
+            _overlay = new OverlayFormu { Avatarlar = _avatarlar, Depo = _depo, Api = _api, Owner = _perde, TusYazisi = _overlayTusu.ToString() };
             _overlay.KapatIstendi += OverlayKapat;
             _overlay.Deactivate += (_, _) => BeginInvoke(() =>
             {
@@ -332,8 +332,6 @@ public partial class AnaForm
                 if (OverlayAcik && ActiveForm is null && !Pencereler.BizimMi(Pencereler.OnPencere())) OverlayKapat(oyunaDon: false);
             });
             _overlay.DmSecildi += OverlayDmAc;
-            _overlay.DmGonder += MesajGonder;
-            _overlay.DmEskiIste += async id => await MesajlariYukle(id, eski: true);
             _overlay.PartiGonder += metin => _ = _canli.PartiMesajiGonder(metin);
             _overlay.Davet += PartiyeDavetEt;
             _overlay.PartiKur += async () => await PartiKur();
@@ -361,7 +359,7 @@ public partial class AnaForm
             _mini.EtkilesimAyarla(true);
             _mini.EnUsteGetir();
         }
-        if (_overlay.DmKisi is { } k2) _ = OkunduYap(k2.Id);
+        if (_overlay.DmKisi is { } k2) _depo.GoruntuleniyorsaOkundu(Dm(k2.Id));
     }
 
     private void OverlayKapat() => OverlayKapat(oyunaDon: true);
@@ -379,16 +377,13 @@ public partial class AnaForm
         }
     }
 
-    private async void OverlayDmAc(long id)
+    private void OverlayDmAc(long id)
     {
         var kisi = _liste.Arkadaslar.FirstOrDefault(p => p.Id == id);
         if (kisi is null || _overlay is null) return;
         if (_sohbetler.All(x => x.Karsi.Id != id)) { _sohbetler.Insert(0, new SohbetOzeti(kisi, null, 0)); KenariGuncelle(); }
         _overlay.DmAc(kisi);
-        var v = Veri(id);
-        _overlay.DmGoster(_ben, kisi, v, _basarisiz);
-        if (!v.Yuklendi) await MesajlariYukle(id, eski: false);
-        await OkunduYap(id);
+        _overlay.DmGoster(_ben, kisi);
     }
 
     private bool OverlayDmGoruyor(long id) =>
@@ -396,7 +391,7 @@ public partial class AnaForm
 
     private void OverlayDmYenile(long id, Profil profil)
     {
-        if (_overlay?.DmKisi?.Id == id) _overlay.DmGoster(_ben, profil, Veri(id), _basarisiz);
+        if (_overlay?.DmKisi?.Id == id) _overlay.DmGoster(_ben, profil);
         if (_mini != null && !_miniParti && _miniDm == id) MiniYenile();
     }
 
