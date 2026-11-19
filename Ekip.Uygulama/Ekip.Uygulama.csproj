@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Varliklar\ekip.ico" LogicalName="ekip.ico" />
+    <!-- Renkli emoji: Twemoji PNG'leri + arama verisi (Varliklar\emoji\uret.mjs ile üretilir). -->
+    <EmbeddedResource Include="Varliklar\emoji\emoji.zip" LogicalName="emoji.zip" />
   </ItemGroup>
 
   <ItemGroup>
