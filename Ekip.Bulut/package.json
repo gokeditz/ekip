@@ -1,0 +1,15 @@
+{
+  "name": "ekip-bulut",
+  "private": true,
+  "description": "Ekip sunucusu: Cloudflare Workers + Durable Objects (SQLite). Uygulama SignalR ile bağlanır.",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "denetle": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261118.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.165.0"
+  }
+}

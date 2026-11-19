@@ -1,0 +1,20 @@
+// Ekip sunucusu (Cloudflare). Yayınlamak: npx wrangler deploy
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ekip",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  // Bütün veri ve anlık bağlantılar tek bir Durable Object'te: içinde SQLite var.
+  "durable_objects": {
+    "bindings": [{ "name": "EKIP", "class_name": "EkipSunucu" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EkipSunucu"] }],
+
+  "vars": {
+    // IP başına dakikada giriş/kayıt denemesi.
+    "HESAP_LIMITI": "10"
+  }
+}

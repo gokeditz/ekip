@@ -1,0 +1,497 @@
+// Ekip sunucusu, Cloudflare üzerinde. Ekip.Sunucu (C#) ile birebir aynı HTTP uçlarını sunar ve uygulamadaki
+// SignalR istemcisinin konuştuğu "JSON hub protokolü"nü taklit eder; böylece uygulamada sunucu adresi dışında
+// hiçbir şey değişmez.
+//
+// Bütün veri ve anlık bağlantılar tek bir Durable Object'te (EkipSunucu) durur: içinde SQLite var, tek iş
+// parçacığında çalışır (kilit gerekmez). Bağlantılar "hibernation" ile tutulur: kimse bir şey yazmazken nesne
+// uyur, ücret/kota harcanmaz; mesaj gelince uyanır.
+import { DurableObject } from "cloudflare:workers";
+import {
+  Durum, HubOlaylari, Kurallar, Profil, ProfilGuncelleme,
+  gorunenAdKontrol, kullaniciAdiKontrol, profilKontrol, sifreKontrol,
+} from "./kurallar";
+import { PartiYoneticisi } from "./parti";
+import { Iliski, Veritabani } from "./veritabani";
+
+export interface Env {
+  EKIP: DurableObjectNamespace<EkipSunucu>;
+  HESAP_LIMITI?: string;
+}
+
+// Giriş noktası: her isteği tek sunucu nesnesine iletir.
+export default {
+  async fetch(istek: Request, env: Env): Promise<Response> {
+    return env.EKIP.get(env.EKIP.idFromName("ana")).fetch(istek);
+  },
+} satisfies ExportedHandler<Env>;
+
+const RS = "\x1e"; // SignalR mesaj ayırıcı
+const PING = '{"type":6}' + RS;
+
+interface Ek { uid: number; el: boolean } // Bağlantıya iliştirilen bilgi (uykudan sonra da kalır). el: el sıkışma bitti mi
+interface Kimlik { id: number; admin: boolean }
+type Govde = Record<string, unknown>;
+
+class HttpHata { constructor(public durum: number, public mesaj?: string, public alan?: string) {} }
+
+const json = (veri: unknown, durum = 200) =>
+  new Response(JSON.stringify(veri), { status: durum, headers: { "Content-Type": "application/json; charset=utf-8" } });
+const hata = (durum: number, mesaj: string, alan?: string) => json({ mesaj, alan: alan ?? null }, durum);
+const tamam = () => new Response(null, { status: 200 });
+const bos = (durum: number) => new Response(null, { status: durum });
+
+function resimTuru(v: Uint8Array): string | null {
+  if (v.length > 8 && v[0] === 0x89 && v[1] === 0x50 && v[2] === 0x4e && v[3] === 0x47) return "image/png";
+  if (v.length > 3 && v[0] === 0xff && v[1] === 0xd8 && v[2] === 0xff) return "image/jpeg";
+  return null;
+}
+
+export class EkipSunucu extends DurableObject<Env> {
+  private readonly db: Veritabani;
+  private readonly parti: PartiYoneticisi;
+  private readonly limitler = new Map<string, { bas: number; n: number }>();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.db = new Veritabani(ctx.storage.sql, f => ctx.storage.transactionSync(f));
+    this.parti = new PartiYoneticisi(ctx.storage.sql, this.db, id => this.cevrimici(id), p => this.baskasina(p));
+    // Kimse bağlı değilse (ilk açılış ya da yeniden başlatma) eski partiler geçersizdir.
+    if (ctx.getWebSockets().length === 0) this.parti.hepsiniSil();
+    // Uygulamanın 15 saniyede bir gönderdiği ping'e nesneyi uyandırmadan cevap ver.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PING));
+  }
+
+  // ---- Varlık (kim çevrimiçi) ----
+
+  private soketler(uid: number, haric?: WebSocket): WebSocket[] {
+    return this.ctx.getWebSockets("u" + uid).filter(ws =>
+      ws !== haric && ws.readyState === WebSocket.OPEN && (ws.deserializeAttachment() as Ek | null)?.el === true);
+  }
+
+  private cevrimici(id: number): boolean { return this.soketler(id).length > 0; }
+
+  // Başkalarının göreceği durum: bağlı değilse ya da görünmezse çevrimdışı.
+  private gorunen(id: number, secilen: number): number {
+    return !this.cevrimici(id) || secilen === Durum.Gorunmez ? Durum.Cevrimdisi : secilen;
+  }
+
+  private baskasina(p: Profil): Profil { return { ...p, durum: this.gorunen(p.id, p.durum) }; }
+
+  // ---- Bildirim (sunucudan uygulamalara olay) ----
+
+  private gonder(kimlere: Iterable<number>, olay: string, ...args: unknown[]) {
+    const cerceve = JSON.stringify({ type: 1, target: olay, arguments: args }) + RS;
+    for (const uid of new Set(kimlere))
+      for (const ws of this.soketler(uid)) { try { ws.send(cerceve); } catch { /* kapanıyor */ } }
+  }
+
+  private durumYay(id: number, durum: number) { this.gonder(this.db.arkadasIdleri(id), HubOlaylari.DurumDegisti, id, durum); }
+
+  private profilDegisti(id: number) {
+    const p = this.db.profilGetir(id);
+    if (!p) return;
+    this.gonder(this.db.arkadasIdleri(id), HubOlaylari.ProfilDegisti, this.baskasina(p));
+    this.gonder([id], HubOlaylari.ProfilDegisti, p);
+  }
+
+  private partiGuncellemesiGonder(uyeler: number[]) {
+    if (uyeler.length === 0) return;
+    this.gonder(uyeler, HubOlaylari.PartiGuncellendi, this.parti.bilgisi(uyeler[0]));
+  }
+
+  // ---- Deneme sınırı (spam/şifre deneme) ----
+
+  private sinir(anahtar: string, izin: number, pencereMs: number): boolean {
+    const simdi = Date.now();
+    const k = this.limitler.get(anahtar);
+    if (!k || simdi - k.bas >= pencereMs) { this.limitler.set(anahtar, { bas: simdi, n: 1 }); return true; }
+    if (k.n >= izin) return false;
+    k.n++;
+    if (this.limitler.size > 5000) this.limitler.clear(); // Bellek şişmesin.
+    return true;
+  }
+
+  // ---- HTTP ----
+
+  async fetch(istek: Request): Promise<Response> {
+    try {
+      return await this.yonlendir(istek, new URL(istek.url));
+    } catch (e) {
+      if (e instanceof HttpHata) return e.mesaj ? hata(e.durum, e.mesaj, e.alan) : bos(e.durum);
+      console.error(e);
+      return hata(500, "Sunucuda bir sorun oldu.");
+    }
+  }
+
+  private tokenAl(istek: Request, url: URL): string | null {
+    const b = istek.headers.get("Authorization") ?? "";
+    if (/^bearer /i.test(b)) return b.slice(7).trim();
+    if (url.pathname.startsWith("/hub")) return url.searchParams.get("access_token");
+    return null;
+  }
+
+  private async kimlik(istek: Request, url: URL): Promise<Kimlik | null> {
+    const t = this.tokenAl(istek, url);
+    if (!t) return null;
+    const o = await this.db.oturumdanKullanici(t);
+    return o ? { id: o.kullanici.id, admin: o.admin } : null;
+  }
+
+  private async govde(istek: Request): Promise<Govde> {
+    let g: unknown;
+    try { g = await istek.json(); } catch { throw new HttpHata(400); }
+    if (g === null || typeof g !== "object" || Array.isArray(g)) throw new HttpHata(400);
+    return g as Govde;
+  }
+
+  private async yonlendir(istek: Request, url: URL): Promise<Response> {
+    const y = url.pathname.replace(/\/+$/, "") || "/";
+    const m = istek.method;
+    const ip = istek.headers.get("CF-Connecting-IP") ?? "?";
+
+    if (y === "/" && m === "GET") return new Response("Ekip sunucusu çalışıyor.", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+
+    // ---- Hesap (oturumsuz) ----
+    if (m === "POST" && (y === "/api/kayit" || y === "/api/giris")) {
+      if (!this.sinir("h:" + ip, Number(this.env.HESAP_LIMITI ?? "10") || 10, 60_000)) return bos(429);
+      const i = await this.govde(istek);
+      return y === "/api/kayit" ? this.kayit(i) : this.giris(i);
+    }
+
+    // Buradan sonrası oturum ister.
+    const ben = await this.kimlik(istek, url);
+
+    if (y === "/hub/negotiate" && m === "POST") {
+      if (!ben) return bos(401);
+      const cid = crypto.randomUUID();
+      return json({
+        negotiateVersion: 1, connectionId: cid, connectionToken: crypto.randomUUID(),
+        availableTransports: [{ transport: "WebSockets", transferFormats: ["Text", "Binary"] }],
+      });
+    }
+    if (y === "/hub") {
+      if (istek.headers.get("Upgrade")?.toLowerCase() !== "websocket") return bos(400);
+      if (!ben) return bos(401);
+      const cift = new WebSocketPair();
+      this.ctx.acceptWebSocket(cift[1], ["u" + ben.id]);
+      cift[1].serializeAttachment({ uid: ben.id, el: false } satisfies Ek);
+      return new Response(null, { status: 101, webSocket: cift[0] });
+    }
+
+    if (!y.startsWith("/api/")) return bos(404);
+    if (!ben) return bos(401);
+    const p = y.split("/").slice(2); // "/api/a/b" -> ["a","b"]
+    const sayi = (s: string | undefined): number => {
+      if (!s || !/^\d{1,15}$/.test(s)) throw new HttpHata(404);
+      return Number(s);
+    };
+
+    if (p[0] === "cikis" && p.length === 1 && m === "POST") {
+      await this.db.oturumKapat(this.tokenAl(istek, url)!);
+      return tamam();
+    }
+    if (p[0] === "admin") {
+      if (!ben.admin) return bos(403);
+      return this.yonetim(istek, m, p.slice(1), ben, sayi);
+    }
+
+    // ---- Profil ----
+    if (p[0] === "ben" && p.length === 1 && m === "GET") {
+      const pr = this.db.profilGetir(ben.id);
+      return pr ? json(pr) : bos(401);
+    }
+    if (p[0] === "profil" && p.length === 1 && m === "PUT") {
+      const g = await this.govde(istek) as unknown as ProfilGuncelleme;
+      if (typeof g.profilRengi !== "string" || (g.hakkimda != null && typeof g.hakkimda !== "string") ||
+        (g.durumMesaji != null && typeof g.durumMesaji !== "string")) return bos(400);
+      const h = profilKontrol(g);
+      if (h) return hata(400, h);
+      this.db.profilGuncelle(ben.id, g);
+      this.profilDegisti(ben.id);
+      return json(this.db.profilGetir(ben.id));
+    }
+    if (p[0] === "profil" && p[1] === "avatar" && p.length === 2) {
+      if (m === "PUT") {
+        if (Number(istek.headers.get("Content-Length") ?? "0") > Kurallar.AvatarMaxBayt) return hata(400, "Resim çok büyük.");
+        const veri = await istek.arrayBuffer();
+        if (veri.byteLength > Kurallar.AvatarMaxBayt) return hata(400, "Resim çok büyük.");
+        if (!resimTuru(new Uint8Array(veri))) return hata(400, "Sadece PNG veya JPEG yüklenebilir.");
+        this.db.avatarAyarla(ben.id, veri);
+      } else if (m === "DELETE") {
+        this.db.avatarAyarla(ben.id, null);
+      } else return bos(405);
+      this.profilDegisti(ben.id);
+      return json(this.db.profilGetir(ben.id));
+    }
+    if (p[0] === "avatar" && p.length === 2 && m === "GET") {
+      const veri = this.db.avatarGetir(sayi(p[1]));
+      const tur = veri ? resimTuru(new Uint8Array(veri)) : null;
+      if (!veri || !tur) return bos(404);
+      return new Response(veri, { headers: { "Content-Type": tur, "Cache-Control": "private, max-age=86400" } });
+    }
+
+    // ---- Arkadaşlar ----
+    if (p[0] === "arkadaslar") {
+      if (p.length === 1 && m === "GET") {
+        const { arkadaslar, gelen, giden } = this.db.arkadaslariGetir(ben.id);
+        const gizli = (x: Profil) => ({ ...x, durum: Durum.Cevrimdisi }); // Arkadaş olmayanın durumu gizli.
+        return json({ arkadaslar: arkadaslar.map(x => this.baskasina(x)), gelen: gelen.map(gizli), giden: giden.map(gizli) });
+      }
+      if (p.length === 2 && p[1] === "istek" && m === "POST") {
+        if (!this.sinir("i:" + ben.id, 20, 60_000)) return bos(429);
+        return this.istekGonder(ben.id, await this.govde(istek));
+      }
+      if (p.length === 3 && p[2] === "kabul" && m === "POST") {
+        const id = sayi(p[1]);
+        if (!this.db.istekKabulEt(ben.id, id)) return hata(404, "Bu istek artık geçerli değil.");
+        this.gonder([ben.id, id], HubOlaylari.ArkadaslarDegisti);
+        return tamam();
+      }
+      if (p.length === 2 && m === "DELETE") {
+        const id = sayi(p[1]);
+        if (this.db.iliskiSil(ben.id, id)) this.gonder([ben.id, id], HubOlaylari.ArkadaslarDegisti);
+        return tamam();
+      }
+    }
+
+    // ---- Mesajlar ----
+    if (p[0] === "sohbetler" && p.length === 1 && m === "GET")
+      return json(this.db.sohbetOzetleri(ben.id).map(s => ({ karsi: this.baskasina(s.karsi), sonMesaj: s.son, okunmamis: s.okunmamis })));
+
+    if (p[0] === "mesajlar" && p.length >= 2) {
+      const id = sayi(p[1]);
+      const arkadasDegil = () => hata(403, "Sadece arkadaşlarınla mesajlaşabilirsin.");
+      if (p.length === 2 && m === "GET") {
+        const o = url.searchParams.get("once");
+        if (o !== null && !/^-?\d{1,18}$/.test(o)) return bos(400);
+        if (this.db.iliskiGetir(ben.id, id) !== Iliski.Arkadas) return arkadasDegil();
+        return json(this.db.mesajlar(ben.id, id, o === null ? null : Number(o), Kurallar.MesajSayfasi));
+      }
+      if (p.length === 2 && m === "POST") {
+        if (!this.sinir("m:" + ben.id, 20, 10_000)) return bos(429);
+        const i = await this.govde(istek);
+        const metin = (typeof i.metin === "string" ? i.metin : "").trim();
+        if (metin.length === 0) return hata(400, "Boş mesaj gönderilemez.");
+        if (metin.length > Kurallar.MesajMax) return hata(400, `Mesaj en fazla ${Kurallar.MesajMax} karakter olabilir.`);
+        if (this.db.iliskiGetir(ben.id, id) !== Iliski.Arkadas) return arkadasDegil();
+        const mesaj = this.db.mesajEkle(ben.id, id, metin);
+        mesaj.istemciId = typeof i.istemciId === "string" && i.istemciId.length <= 64 ? i.istemciId : null;
+        this.gonder([mesaj.gonderenId, mesaj.aliciId], HubOlaylari.MesajGeldi, mesaj); // Alıcıya ve diğer cihazlarıma.
+        return json(mesaj);
+      }
+      if (p.length === 3 && p[2] === "okundu" && m === "POST") {
+        if (this.db.okunduIsaretle(ben.id, id) > 0) this.gonder([ben.id], HubOlaylari.SohbetOkundu, id);
+        return tamam();
+      }
+    }
+
+    return bos(404);
+  }
+
+  private async kayit(i: Govde): Promise<Response> {
+    const h = kullaniciAdiKontrol(i.kullaniciAdi) ?? gorunenAdKontrol(i.gorunenAd) ?? sifreKontrol(i.sifre);
+    if (h) return hata(400, h);
+    const s = await this.db.kayitOl(i.kullaniciAdi as string, (i.gorunenAd as string).trim(), i.sifre as string, i.kod);
+    if (!s.kullanici) return hata(s.alan === "kullaniciAdi" ? 409 : 400, s.hata!, s.alan);
+    return json({ token: await this.db.oturumAc(s.kullanici.id), kullanici: s.kullanici });
+  }
+
+  private async giris(i: Govde): Promise<Response> {
+    const ad = i.kullaniciAdi, sifre = i.sifre;
+    if (typeof ad !== "string" || ad.trim().length === 0 || typeof sifre !== "string" || sifre.length === 0 || sifre.length > Kurallar.SifreMax)
+      return hata(400, "Kullanıcı adı ve şifre gerekli.");
+    const s = await this.db.girisDogrula(ad, sifre);
+    if (s.yasakli) return hata(403, "Bu hesap yasaklandı.");
+    if (!s.kullanici) return hata(401, "Kullanıcı adı veya şifre yanlış.");
+    return json({ token: await this.db.oturumAc(s.kullanici.id), kullanici: s.kullanici });
+  }
+
+  private istekGonder(ben: number, i: Govde): Response {
+    const ad = (typeof i.kullaniciAdi === "string" ? i.kullaniciAdi : "").trim().replace(/^@+/, "");
+    if (ad.length === 0) return hata(400, "Bir kullanıcı adı yaz.");
+    const o = this.db.kullaniciIdBul(ad);
+    if (o === null) return hata(404, `"${ad}" adında biri yok. Yazımı kontrol et.`);
+    if (o === ben) return hata(400, "Kendine istek gönderemezsin 🙂");
+    switch (this.db.iliskiGetir(ben, o)) {
+      case Iliski.Arkadas: return hata(409, "Zaten arkadaşsınız.");
+      case Iliski.BenGonderdim: return hata(409, "Bu kişiye zaten istek gönderdin.");
+      case Iliski.OGonderdi:
+        // O da bana istek atmış: direkt arkadaş olalım.
+        this.db.istekKabulEt(ben, o);
+        this.gonder([ben, o], HubOlaylari.ArkadaslarDegisti);
+        return json({ mesaj: "O da sana istek göndermişti, artık arkadaşsınız!", arkadasOldunuz: true });
+      default: {
+        this.db.istekEkle(ben, o);
+        this.gonder([ben, o], HubOlaylari.ArkadaslarDegisti);
+        const adi = this.db.profilGetir(o)?.gorunenAd ?? ad;
+        return json({ mesaj: `İstek gönderildi. ${adi} kabul edince arkadaş olacaksınız.`, arkadasOldunuz: false });
+      }
+    }
+  }
+
+  // ---- Yönetim (admin) ----
+
+  private async yonetim(istek: Request, m: string, p: string[], ben: Kimlik, sayi: (s?: string) => number): Promise<Response> {
+    if (p[0] === "ozet" && p.length === 1 && m === "GET") {
+      const k = this.db.kullanicilar();
+      const simdi = Math.floor(Date.now() / 1000);
+      const aktifKod = this.db.kodlar().filter(x => !x.iptal && x.kalanKullanim !== 0 && (x.sonKullanma === null || x.sonKullanma > simdi)).length;
+      return json({ kullanici: k.length, cevrimici: k.filter(x => this.cevrimici(x.id)).length, aktifKod });
+    }
+    if (p[0] === "kodlar") {
+      if (p.length === 1 && m === "GET") return json(this.db.kodlar());
+      if (p.length === 1 && m === "POST") {
+        const i = await this.govde(istek);
+        const kullanim = i.kullanim, gun = i.gun ?? null;
+        if (!Number.isInteger(kullanim) || (gun !== null && !Number.isInteger(gun))) return bos(400);
+        if ((kullanim as number) < 0 || (kullanim as number) > 1000 || (gun !== null && ((gun as number) < 0 || (gun as number) > 3650)))
+          return hata(400, "Geçersiz kod ayarı.");
+        return json(this.db.kodOlustur(ben.id, kullanim as number, gun as number | null));
+      }
+      if (p.length === 2 && m === "DELETE")
+        return this.db.kodIptal(decodeURIComponent(p[1])) ? tamam() : hata(404, "Böyle bir kod yok.");
+    }
+    if (p[0] === "kullanicilar") {
+      if (p.length === 1 && m === "GET")
+        return json(this.db.kullanicilar().map(x => ({
+          id: x.id, kullaniciAdi: x.ad, gorunenAd: x.gorunen, profilRengi: x.renk, avatarSurum: x.avatar, kayit: x.kayit,
+          admin: x.admin, yasakli: x.yasakli, cevrimici: this.cevrimici(x.id), davetKodu: x.kod,
+        })));
+      if (p.length === 3 && m === "POST" && (p[2] === "admin" || p[2] === "yasak")) {
+        const id = sayi(p[1]);
+        const deger = (await this.govde(istek)).deger;
+        if (typeof deger !== "boolean") return bos(400);
+        if (p[2] === "admin") {
+          if (id === ben.id && !deger) return hata(400, "Kendi adminliğini kaldıramazsın.");
+          this.db.adminAyarla(id, deger);
+          return tamam();
+        }
+        if (id === ben.id) return hata(400, "Kendini yasaklayamazsın.");
+        if (deger && this.db.adminMi(id)) return hata(400, "Önce adminliğini kaldır, sonra yasakla.");
+        this.db.yasakAyarla(id, deger);
+        // Açık uygulaması varsa hemen çıkış yaptır (oturumları zaten silindi).
+        if (deger) this.gonder([id], HubOlaylari.OturumSonlandi, "Hesabın yasaklandı.");
+        return tamam();
+      }
+    }
+    return bos(404);
+  }
+
+  // ---- SignalR (JSON hub protokolü, WebSocket üzerinden) ----
+
+  async webSocketMessage(ws: WebSocket, ileti: string | ArrayBuffer) {
+    const metin = typeof ileti === "string" ? ileti : new TextDecoder().decode(ileti);
+    for (const parca of metin.split(RS)) {
+      if (parca.length === 0) continue;
+      let o: Govde;
+      try { o = JSON.parse(parca); } catch { ws.close(1003, "Geçersiz mesaj"); return; }
+      const ek = ws.deserializeAttachment() as Ek;
+
+      if (!ek.el) {
+        // İlk mesaj el sıkışma: {"protocol":"json","version":1}
+        if (o.protocol !== "json") { ws.send(JSON.stringify({ error: "Sadece json protokolü destekleniyor." }) + RS); ws.close(1000, ""); return; }
+        ws.send("{}" + RS);
+        const ilk = this.soketler(ek.uid).length === 0;
+        ws.serializeAttachment({ uid: ek.uid, el: true } satisfies Ek);
+        if (ilk) {
+          const pr = this.db.profilGetir(ek.uid);
+          if (pr && pr.durum !== Durum.Gorunmez) this.durumYay(ek.uid, pr.durum);
+        }
+        continue;
+      }
+
+      switch (o.type) {
+        case 1: await this.cagir(ws, ek.uid, o); break;   // Çağrı
+        case 6: ws.send(PING); break;                      // Ping (başka mesajla birlikte geldiyse)
+        case 7: ws.close(1000, ""); return;                // Kapat
+      }
+    }
+  }
+
+  private async cagir(ws: WebSocket, ben: number, o: Govde) {
+    const id = typeof o.invocationId === "string" ? o.invocationId : null;
+    const a = Array.isArray(o.arguments) ? o.arguments as unknown[] : [];
+    const tamamla = (sonuc: Govde) => { if (id) { try { ws.send(JSON.stringify({ type: 3, invocationId: id, ...sonuc }) + RS); } catch { } } };
+    try {
+      const r = this.hubMetodu(ben, String(o.target), a);
+      tamamla(r === undefined ? {} : { result: r });
+    } catch (e) {
+      tamamla({ error: e instanceof HttpHata ? e.mesaj ?? "Geçersiz çağrı." : "Sunucuda bir sorun oldu." });
+      if (!(e instanceof HttpHata)) console.error(e);
+    }
+  }
+
+  // Ekip.Sunucu/Varlik.cs EkipHub metotları. undefined dönen = sonucu olmayan (void) metot.
+  private hubMetodu(ben: number, ad: string, a: unknown[]): unknown {
+    const sayiArg = (x: unknown) => { if (typeof x !== "number" || !Number.isInteger(x)) throw new HttpHata(400, "Geçersiz çağrı."); return x; };
+    const yaziArg = (x: unknown) => { if (typeof x !== "string") throw new HttpHata(400, "Geçersiz çağrı."); return x; };
+
+    switch (ad) {
+      case "PartiDurumum": return this.parti.durum(ben);
+      case "PartiKur": return this.parti.kur(ben);
+      case "PartiyeDavetEt": {
+        const kimi = sayiArg(a[0]);
+        const r = this.parti.davetEt(ben, kimi);
+        if (r.hata) return r.hata;
+        const p = this.db.profilGetir(ben);
+        if (p) this.gonder([kimi], HubOlaylari.PartiDaveti, r.partiId, this.baskasina(p));
+        return null;
+      }
+      case "DaveteKatil": {
+        const { durum, eskiUyeler } = this.parti.katil(ben, yaziArg(a[0]));
+        if (!durum) return null;
+        this.partiGuncellemesiGonder(eskiUyeler);
+        // Diğer cihazlarım da dahil herkese yeni üye listesi.
+        this.gonder(durum.bilgi.uyeler.map(x => x.id), HubOlaylari.PartiGuncellendi, durum.bilgi);
+        return durum;
+      }
+      case "DavetiReddet": this.parti.reddet(ben, yaziArg(a[0])); return undefined;
+      case "PartidenAyril":
+        this.partiGuncellemesiGonder(this.parti.ayril(ben));
+        this.gonder([ben], HubOlaylari.PartiGuncellendi, null);
+        return undefined;
+      case "OyunSec": {
+        const b = this.parti.oyunSec(ben, a[0] == null ? null : yaziArg(a[0]));
+        if (b) this.gonder(b.uyeler.map(x => x.id), HubOlaylari.PartiGuncellendi, b);
+        return undefined;
+      }
+      case "PartiMesajiGonder": {
+        const { mesaj, alicilar } = this.parti.mesajEkle(ben, a[0]);
+        if (mesaj) this.gonder(alicilar, HubOlaylari.PartiMesaji, mesaj);
+        return undefined;
+      }
+      case "DurumAyarla": {
+        const d = sayiArg(a[0]);
+        if (d < 1 || d > 4) return undefined;
+        this.db.durumAyarla(ben, d);
+        this.durumYay(ben, this.gorunen(ben, d));
+        this.gonder([ben], HubOlaylari.DurumDegisti, ben, d); // Diğer cihazlarım da bilsin.
+        return undefined;
+      }
+      case "Yaziyor": {
+        const karsi = sayiArg(a[0]);
+        if (this.db.iliskiGetir(ben, karsi) === Iliski.Arkadas) this.gonder([karsi], HubOlaylari.Yaziyor, ben);
+        return undefined;
+      }
+      default: throw new HttpHata(400, `Bilinmeyen metot: ${ad}`);
+    }
+  }
+
+  async webSocketClose(ws: WebSocket) { this.ayrildi(ws); }
+  async webSocketError(ws: WebSocket) { this.ayrildi(ws); }
+
+  // Kapanış hem "close" hem "error" olarak gelebilir; aynı bağlantıyı bir kez işle.
+  private readonly islenenler = new WeakSet<WebSocket>();
+
+  private ayrildi(ws: WebSocket) {
+    if (this.islenenler.has(ws)) return;
+    this.islenenler.add(ws);
+    let ek: Ek | null = null;
+    try { ek = ws.deserializeAttachment() as Ek | null; } catch { }
+    try { ws.close(1000, ""); } catch { }
+    if (!ek?.el) return; // El sıkışmamış.
+    if (this.soketler(ek.uid, ws).length > 0) return; // Başka cihazından hâlâ bağlı.
+    this.durumYay(ek.uid, Durum.Cevrimdisi);
+    this.partiGuncellemesiGonder(this.parti.ayril(ek.uid)); // Tamamen çıkınca partiden de düşer.
+  }
+}

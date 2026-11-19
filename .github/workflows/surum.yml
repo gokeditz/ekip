@@ -1,10 +1,9 @@
 # Yeni sürüm: "v1.0.1" gibi bir etiket gönderince (git tag v1.0.1 && git push origin v1.0.1)
-#  1) Uygulama Windows için tek exe olarak derlenir, sunucu Linux (Oracle) için derlenir.
+#  1) Uygulama Windows için tek exe olarak derlenir. (Sunucu Cloudflare'da: Ekip.Bulut, "npx wrangler deploy".)
 #  2) GitHub'da bir "Release" oluşturulur. İçinde:
 #       Ekip-Windows.zip          -> ilk kurulum (arkadaşlara bu link verilir)
 #       Ekip-<sürüm>.zip + son.json -> otomatik güncelleme; açık olan tüm Ekip'ler 30 dakika içinde
 #                                    (ya da bir sonraki açılışta) yeni sürümü görüp güncellemeyi sorar
-#       Ekip-Sunucu-linux-arm64.zip -> Oracle sunucusu
 name: Sürüm
 
 on:
@@ -43,17 +42,10 @@ jobs:
             -IndirmeTabani "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
           Copy-Item "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" Ekip-Windows.zip
 
-      - name: Sunucu (Linux ARM64, Oracle için)
-        shell: pwsh
-        run: |
-          dotnet publish Ekip.Sunucu -c Release -r linux-arm64 --self-contained -p:PublishSingleFile=true `
-            -p:DebugType=none -p:Version=${{ steps.surum.outputs.no }} -o yayin/sunucu
-          Compress-Archive -Path yayin/sunucu/* -DestinationPath Ekip-Sunucu-linux-arm64.zip
-
       - name: Release oluştur
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --title "Ekip ${{ github.ref_name }}" --generate-notes `
-            Ekip-Windows.zip "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" yayin/guncelleme/son.json Ekip-Sunucu-linux-arm64.zip
+            Ekip-Windows.zip "yayin/guncelleme/Ekip-${{ steps.surum.outputs.no }}.zip" yayin/guncelleme/son.json

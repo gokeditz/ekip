@@ -8,9 +8,8 @@ namespace Ekip.Uygulama;
 // dosya başka bilgisayara kopyalansa bile işe yaramaz.
 public class Ayarlar
 {
-    // Arkadaşlara dağıtmadan önce bunu kendi sunucu adresinle değiştir (ör. "https://ekip.duckdns.org").
-    // Böylece kimse "Sunucu ayarı"na girmek zorunda kalmaz. Bkz. KURULUM.md.
-    public const string VarsayilanSunucu = "http://localhost:5080";
+    // Cloudflare'daki sunucu (Ekip.Bulut). Yerel deneme için "Sunucu ayarı"ndan başka adres girilebilir. Bkz. KURULUM.md.
+    public const string VarsayilanSunucu = "https://ekip.ekip-bulut.workers.dev";
 
     // Otomatik güncelleme: son sürüm bilgisinin (son.json) adresi. Boşsa güncelleme kontrolü yapılmaz.
     // GitHub'daki en son Release'in son.json dosyası (surum.yml her sürümde ekler).
@@ -41,7 +40,12 @@ public class Ayarlar
         try
         {
             if (File.Exists(Dosya))
-                return JsonSerializer.Deserialize<Ayarlar>(File.ReadAllText(Dosya)) ?? new Ayarlar();
+            {
+                var a = JsonSerializer.Deserialize<Ayarlar>(File.ReadAllText(Dosya)) ?? new Ayarlar();
+                // Eski sürümlerin varsayılanı (geliştirme sunucusu) kayıtlıysa yeni sunucuya geç.
+                if (a.SunucuAdresi.TrimEnd('/') == "http://localhost:5080") { a.SunucuAdresi = VarsayilanSunucu; a.SifreliToken = null; }
+                return a;
+            }
         }
         catch { /* Bozuk dosya: varsayılanlarla devam. */ }
         return new Ayarlar();
