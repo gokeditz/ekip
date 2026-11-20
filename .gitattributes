@@ -1,3 +1,0 @@
-# Linux'ta çalışacak dosyalar her zaman LF satır sonuyla kalsın (CRLF olursa bash betiği bozulur).
-*.sh      text eol=lf
-*.service text eol=lf

@@ -21,8 +21,7 @@ GitHub (açık depo: gokeditz/ekip)
 
 ## 1. Sunucu: Cloudflare (Ekip.Bulut)
 
-Sunucu `Ekip.Bulut/` klasöründe, TypeScript ile yazılı. Uygulamayla eski C# sunucusunun
-(`Ekip.Sunucu/`) aynısı gibi konuşur: aynı adresler, aynı JSON, aynı SignalR olayları.
+Sunucu `Ekip.Bulut/` klasöründe, TypeScript ile yazılı. Uygulama sunucuyla SignalR (JSON hub protokolü) ve REST üzerinden konuşur.
 
 - **Bedava sınırlar:** günde 100.000 istek, 1 GB veri. 10-20 kişilik bir grup bunun çok altında kalır.
 - **Uyku:** Kimse bir şey yapmazken sunucu uyur, mesaj gelince anında uyanır; bağlantılar kopmaz.
@@ -105,11 +104,3 @@ sunucu adresi uygulamanın içinde. Bundan sonraki sürümler kendiliğinden gel
 exe'nin yanına yazabilmeli.) Windows "bilinmeyen yayımcı" uyarısı verirse **Ek bilgi → Yine de çalıştır**.
 
 ---
-
-## Ek: Kendi makinende sunucu (Oracle vb.)
-
-Eski C# sunucusu (`Ekip.Sunucu/`) ve Linux kurulum betikleri (`dagitim/sunucu-kur.sh`,
-`dagitim/yayinla.ps1`, `dagitim/ekip-sunucu.service`) yedek olarak duruyor. Bir gün Cloudflare
-yerine kendi sunucunu kullanmak istersen: Ubuntu makine + Caddy (HTTPS) +
-`sudo bash sunucu-kur.sh senin-alan-adin` yeterli; sonra `Ayarlar.cs`'teki `VarsayilanSunucu`
-adresini değiştirip yeni sürüm çıkarırsın.
