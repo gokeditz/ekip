@@ -23,7 +23,7 @@ public partial class AnaForm : TemaliForm
     private readonly BosDurum _bos = new() { Visible = false };
     private readonly EklePaneli _ekle = new() { Visible = false };
     private readonly System.Windows.Forms.Timer _bantZamanlayici = new() { Interval = 4000 };
-    private bool _bagli;
+    private bool _bagli, _bagliOldu;
 
     // Sohbetler
     private List<SohbetOzeti> _sohbetler = [];
@@ -116,7 +116,18 @@ public partial class AnaForm : TemaliForm
         _canli.ArkadaslarDegisti += async () => await Yenile();
         _canli.ProfilDegisti += ProfilGeldi;
         _canli.DurumDegisti += DurumGeldi;
-        _canli.BaglantiDegisti += b => { _bagli = b; BantGuncelle(); };
+        _canli.BaglantiDegisti += async b =>
+        {
+            bool yeniBaglandi = b && !_bagliOldu;
+            _bagli = b;
+            BantGuncelle();
+            if (!yeniBaglandi) return;
+            // İlk bağlantı (uygulama bağlantısız açıldıysa listeler boş kaldı): her şeyi ve profilimi tazele.
+            _bagliOldu = true;
+            _ = AdminMiKontrol();
+            await Yenile();
+            if (await _api.Ben() is { Basarili: true } ben) ProfilGeldi(ben.Veri!);
+        };
         _canli.OturumSonlandi += sebep => { CikisSebebi = sebep; CikisYapildi?.Invoke(); };
 
         PartiOlaylariniBagla();
@@ -175,7 +186,8 @@ public partial class AnaForm : TemaliForm
         var a = await arkadaslar;
         var s = await sohbetler;
         if (no != _yenilemeNo || IsDisposed) return; // Daha yeni bir yenileme başladıysa bu sonucu at.
-        if (!a.Basarili) { Bildir(a.Hata!, hata: true); return; }
+        // Bağlantı hatasında üstteki "yeniden bağlanılıyor" bandı yeterli; bildirim sadece sunucunun reddettiği durumlar için.
+        if (!a.Basarili) { if (a.Durum is not null) Bildir(a.Hata!, hata: true); return; }
         _liste = a.Veri!;
 
         if (s.Basarili)

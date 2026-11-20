@@ -61,7 +61,12 @@ public class GirisFormu : TemaliForm
         Mesgul(true, "Oturum açılıyor…");
         var api = new Api(_ayarlar.SunucuAdresi) { Token = token };
         var sonuc = await api.Ben();
-        // İnternet/sunucu bir anlık cevap vermediyse oturum geçersiz değildir: giriş ekranına düşmeden tekrar dene.
+        if (IsDisposed) return;
+        if (sonuc.Basarili) { GirisYapildi?.Invoke(api, sonuc.Veri!); return; }
+
+        // Sunucuya bir anlık ulaşılamadı (oturum geçersiz değil): seni dışarı atmayalım. Son bilinen profille aç;
+        // ana pencere "bağlanılıyor" bandını gösterir, bağlantı gelince her şey kendiliğinden yüklenir.
+        if (sonuc.Durum is null && _ayarlar.SonProfil is { } son) { GirisYapildi?.Invoke(api, son); return; }
         for (int deneme = 1; !sonuc.Basarili && sonuc.Durum is null && deneme <= 4 && !IsDisposed; deneme++)
         {
             Mesgul(true, $"Sunucuya bağlanılıyor… ({deneme + 1}. deneme)");
@@ -72,7 +77,8 @@ public class GirisFormu : TemaliForm
         if (sonuc.Basarili) { GirisYapildi?.Invoke(api, sonuc.Veri!); return; }
 
         Mesgul(false);
-        if (sonuc.Durum == System.Net.HttpStatusCode.Unauthorized) { _ayarlar.Token = null; _ayarlar.Kaydet(); }
+        // Giriş ekranı sadece sunucu oturumu gerçekten reddederse (401) oturumu siler.
+        if (sonuc.Durum == System.Net.HttpStatusCode.Unauthorized) { _ayarlar.Token = null; _ayarlar.SonProfil = null; _ayarlar.Kaydet(); }
         _genelHata.Text = sonuc.Hata;
         IlkKutuyaOdaklan();
     }

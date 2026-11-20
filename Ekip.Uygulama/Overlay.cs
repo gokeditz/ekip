@@ -114,16 +114,51 @@ public static class Pencereler
 // Sistem geneli klavye kancası: kısayollarımızı (overlay, mini sohbet, Esc) oyun öndeyken de yakalar.
 // Karar veren fonksiyon true dönerse tuş yutulur (oyun/tarayıcı görmez), false ise normal çalışır.
 // Her tuşta çalışır, o yüzden karar fonksiyonu hızlı olmalı (sadece birkaç karşılaştırma).
+//
+// Kanca KENDİ iş parçacığında (kendi mesaj döngüsüyle) çalışır. Arayüz iş parçacığında olsaydı, arayüz bir an
+// meşgulken (açılış, çizim, ağ) Windows kancanın cevabını beklemekten vazgeçip kancayı SESSİZCE kaldırıyordu ve
+// Ctrl+Tab kalıcı olarak ölüyordu. Ayrıca güvence olarak kanca birkaç dakikada bir yeniden kurulur.
+// Not: TusBasildi bu iş parçacığında çağrılır; arayüze dokunacaksa BeginInvoke ile yapmalı.
 public sealed class KlavyeKancasi : IDisposable
 {
     private readonly HookProc _geriCagri; // Çöp toplayıcı silmesin diye alanda.
     private IntPtr _kanca;
+    private uint _iplikId;
+    private readonly Thread _iplik;
+    private readonly ManualResetEventSlim _hazir = new();
     public Func<Keys, bool, bool, bool, bool>? TusBasildi { get; set; } // (tuş, ctrl, alt, shift) → yut?
+
+    private static readonly TimeSpan YenidenKur = TimeSpan.FromMinutes(2);
 
     public KlavyeKancasi()
     {
         _geriCagri = Isle;
+        _iplik = new Thread(Calis) { IsBackground = true, Name = "Klavye kancası" };
+        _iplik.Start();
+        _hazir.Wait(2000);
+    }
+
+    private void Calis()
+    {
+        _iplikId = GetCurrentThreadId();
         _kanca = SetWindowsHookEx(13 /*WH_KEYBOARD_LL*/, _geriCagri, GetModuleHandle(null), 0);
+        var zamanlayici = SetTimer(IntPtr.Zero, IntPtr.Zero, (uint)YenidenKur.TotalMilliseconds, IntPtr.Zero);
+        _hazir.Set();
+        while (GetMessage(out var m, IntPtr.Zero, 0, 0) > 0)
+        {
+            if (m.message == 0x0113 /*WM_TIMER*/)
+            {
+                // Windows kancayı sessizce kaldırmış olabilir: yenisini kurup eskisini bırak.
+                var yeni = SetWindowsHookEx(13, _geriCagri, GetModuleHandle(null), 0);
+                if (yeni != IntPtr.Zero) { var eski = _kanca; _kanca = yeni; UnhookWindowsHookEx(eski); }
+                continue;
+            }
+            TranslateMessage(ref m);
+            DispatchMessage(ref m);
+        }
+        KillTimer(IntPtr.Zero, zamanlayici);
+        if (_kanca != IntPtr.Zero) UnhookWindowsHookEx(_kanca);
+        _kanca = IntPtr.Zero;
     }
 
     private IntPtr Isle(int kod, IntPtr wParam, IntPtr lParam)
@@ -142,9 +177,21 @@ public sealed class KlavyeKancasi : IDisposable
 
     public void Dispose()
     {
-        if (_kanca != IntPtr.Zero) UnhookWindowsHookEx(_kanca);
-        _kanca = IntPtr.Zero;
+        // Kanca kendi iş parçacığında kaldırılır: döngüye çıkış mesajı gönder.
+        if (_iplikId != 0) PostThreadMessage(_iplikId, 0x0012 /*WM_QUIT*/, IntPtr.Zero, IntPtr.Zero);
+        _iplik.Join(1000);
+        _hazir.Dispose();
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public int x, y; }
+    [DllImport("user32.dll")] private static extern int GetMessage(out MSG m, IntPtr h, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG m);
+    [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG m);
+    [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint id, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] private static extern IntPtr SetTimer(IntPtr h, IntPtr id, uint ms, IntPtr fn);
+    [DllImport("user32.dll")] private static extern bool KillTimer(IntPtr h, IntPtr id);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 
     private delegate IntPtr HookProc(int kod, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int id, HookProc p, IntPtr mod, uint tid);
@@ -416,9 +463,11 @@ public class OverlayUstSerit : Control
         g.Clear(BackColor);
         var logo = new Rectangle(Tema.S(24), (Height - Tema.S(30)) / 2, Tema.S(30), Tema.S(30));
         Tema.Logo(g, logo);
-        TextRenderer.DrawText(g, "ekip", Tema.Yazi(13, kalin: true), new Rectangle(logo.Right + Tema.S(10), 0, Tema.S(80), Height), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        var adF = Tema.Yazi(13, kalin: true);
+        int adW = TextRenderer.MeasureText(g, Tema.UygulamaAdi, adF, Size.Empty, TextFormatFlags.NoPadding).Width;
+        TextRenderer.DrawText(g, Tema.UygulamaAdi, adF, new Rectangle(logo.Right + Tema.S(10), 0, adW + 4, Height), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
-        int x = logo.Right + Tema.S(84);
+        int x = logo.Right + Tema.S(10) + adW + Tema.S(18);
         using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, x, Height / 2 - Tema.S(12), x, Height / 2 + Tema.S(12));
         x += Tema.S(16);
         TextRenderer.DrawText(g, Glif.Oyun, Cizim.Ikon(12), new Rectangle(x, 0, Tema.S(24), Height), Tema.MetinIkincil, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);

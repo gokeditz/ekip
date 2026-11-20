@@ -64,7 +64,11 @@ public partial class AnaForm
 
     private static bool Eslesir(Kisayol k, Keys t, bool c, bool a, bool s) => k.Tus == t && k.Ctrl == c && k.Alt == a && k.Shift == s;
 
-    // Klavye kancasından her tuşta çağrılır: hızlı olmalı. true dönerse tuş yutulur.
+    private IntPtr _anaPencere;
+    protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); _anaPencere = Handle; }
+
+    // Klavye kancasından her tuşta çağrılır (kancanın kendi iş parçacığında): hızlı olmalı, arayüze sadece
+    // BeginInvoke ile dokunur. true dönerse tuş yutulur.
     private bool TusBasildi(Keys tus, bool ctrl, bool alt, bool shift)
     {
         if (_kisayolYakalaniyor) return false;
@@ -312,7 +316,7 @@ public partial class AnaForm
     {
         if (OverlayAcik) { BeginInvoke(OverlayKapat); return true; }
         var on = Pencereler.OnPencere();
-        bool ekipOnde = on == Handle;
+        bool ekipOnde = on == _anaPencere; // Kanca ayrı iş parçacığında: Handle yerine önceden saklanan değer.
         if (!ekipOnde && (Pencereler.BizimMi(on) || !Pencereler.TamEkran(on))) return false; // Tarayıcıda vs. Ctrl+Tab normal çalışsın.
         BeginInvoke(() => OverlayAc(on));
         return true;
@@ -412,6 +416,9 @@ public partial class AnaForm
         _tepsi.DoubleClick += (_, _) => PencereyiAc();
         _tepsi.BalloonTipClicked += (_, _) => PencereyiAc();
     }
+
+    // Uygulama ikinci kez açılmaya çalışılınca (tek kopya) çağrılır.
+    public void PencereyiGoster() => PencereyiAc();
 
     private void PencereyiAc()
     {

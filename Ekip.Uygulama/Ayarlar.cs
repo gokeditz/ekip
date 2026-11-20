@@ -21,6 +21,9 @@ public class Ayarlar
     public string? SonKullaniciAdi { get; set; }
     public string? SifreliToken { get; set; }
 
+    // Son giriş yapılan profil: açılışta sunucuya bir anlık ulaşılamazsa uygulama bununla açılır (giriş ekranına düşmez).
+    public Ekip.Ortak.Profil? SonProfil { get; set; }
+
     // Kısayollar (Ayarlar > Kısayollar'dan değişir).
     public string OverlayTusu { get; set; } = Kisayol.VarsayilanOverlay.ToString();
     public string MiniTusu { get; set; } = Kisayol.VarsayilanMini.ToString();

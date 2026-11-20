@@ -139,7 +139,8 @@ public static class Guncelleyici
             }
 
             yenidenBaslamadanOnce();
-            var args = Environment.GetCommandLineArgs().Skip(1).Select(a => a.Contains(' ') ? $"\"{a}\"" : a);
+            var args = Environment.GetCommandLineArgs().Skip(1).Where(a => a != "--yeniden").Append("--yeniden") // yeni kopya eskisinin kapanmasını beklesin
+                .Select(a => a.Contains(' ') ? $"\"{a}\"" : a);
             Process.Start(new ProcessStartInfo(yeniExe, string.Join(' ', args)) { UseShellExecute = false, WorkingDirectory = klasor });
             Environment.Exit(0);
             return null;
