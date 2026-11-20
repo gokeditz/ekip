@@ -133,7 +133,7 @@ public class HakkindaPaneli : Control
         int x = Tema.S(32), y = Tema.S(26), w = Math.Min(Tema.S(760), Width - x * 2);
         TextRenderer.DrawText(g, "Hakkında", Tema.Yazi(16, kalin: true), new Point(x - Tema.S(5), y), Tema.Metin, TextFormatFlags.NoPadding);
         y += Tema.S(36);
-        TextRenderer.DrawText(g, $"{Tema.UygulamaAdi}'yi oyun oynarken arkadaşlarınla yazışmak için yaptık: hafif, hızlı, sade.", Tema.Yazi(10), new Rectangle(x - Tema.S(3), y, w, Tema.S(22)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, "Bu uygulamayı oyun oynarken arkadaşlarınla yazışmak için yaptık: hafif, hızlı, sade.", Tema.Yazi(10), new Rectangle(x - Tema.S(3), y, w, Tema.S(22)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         y += Tema.S(34);
 
         // Sürüm satırı: solda sürüm, sağda düğme, altında durum.
@@ -180,7 +180,7 @@ public class KisayolPaneli : Panel
         DoubleBuffered = true;
         _satirlar =
         [
-            ("Overlay'i aç / kapat", "Oyundayken arkadaşlar, parti ve sohbetler tam ekran açılır. Sadece tam ekran bir oyun ya da 31Hane öndeyken çalışır.", _overlay, _overlayVarsayilan),
+            ("Overlay'i aç / kapat", "Oyundayken arkadaşlar, parti ve sohbetler tam ekran açılır. Sadece tam ekran bir oyun ya da uygulama öndeyken çalışır.", _overlay, _overlayVarsayilan),
             ("Mini sohbete yaz", "Oyuna sabitlediğin mini sohbette yazma modunu açar. Bu sırada oyun klavye ve fareyi almaz; mini sohbeti taşıyıp boyutlandırabilir, tekerlekle kaydırabilirsin. Enter gönderir, Esc oyuna döner.", _mini, _miniVarsayilan),
             ("Mini sohbetin yeri ve boyutu", "Mini sohbetin yerini ve boyutunu yazma modunda fareyle ayarlarsın, hatırlanır. Ekran dışında kaldıysa buradan sıfırla.", _miniSifirla, null),
         ];

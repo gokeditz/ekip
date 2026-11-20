@@ -405,7 +405,7 @@ public partial class AnaForm
     private void TepsiKur()
     {
         var menu = new KoyuMenu();
-        menu.Ekle($"{Tema.UygulamaAdi} uygulamasını aç", PencereyiAc);
+        menu.Ekle("Uygulamayı aç", PencereyiAc);
         menu.Ayirici();
         menu.Ekle("Çıkış", () => { _gercektenKapat = true; Close(); }, Tema.Hata);
         _tepsi = new NotifyIcon { Icon = Tema.Ikon, Text = Tema.UygulamaAdi, Visible = true, ContextMenuStrip = menu };

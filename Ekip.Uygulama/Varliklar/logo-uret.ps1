@@ -1,5 +1,5 @@
 ﻿param([string]$Cikti)
-# 31Hane logosu: mor yuvarlak kare, icinde beyaz ev; evin govdesinde mor "31".
+# Uygulama logosu: mor yuvarlak kare, icinde beyaz ev; evin govdesinde mor "31".
 # 24 pikselden kucuk boyutlarda rakam okunmaz: yerine kucuk bir kapi cizilir.
 # Uygulama icindeki cizim Tema.Logo ile ayni (256'lik izgara).
 Add-Type -AssemblyName System.Drawing

@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace Ekip.Uygulama;
 
 // Otomatik güncelleme. Bir adresteki "son.json" okunur:
-//   { "surum": "1.0.1", "indir": "https://.../31Hane-1.0.1.zip", "sha256": "…", "notlar": "…" }
+//   { "surum": "1.0.1", "indir": "https://.../Uygulama-1.0.1.zip", "sha256": "…", "notlar": "…" }
 // Daha yeni sürüm varsa zip indirilir, bütünlüğü (sha256) kontrol edilir, exe değiştirilip uygulama yeniden açılır.
 // Çalışan bir exe Windows'ta silinemez ama YENİDEN ADLANDIRILABİLİR: eskisini ".eski" yapıp yenisini yerine koyuyoruz.
 public static class Guncelleyici
@@ -23,9 +23,9 @@ public static class Guncelleyici
 
     public static string MevcutSurumYazisi => $"{MevcutSurum.Major}.{MevcutSurum.Minor}.{MevcutSurum.Build}";
 
-    // Exe adları: yeni ad önce. Eski ad ("Ekip.Uygulama.exe") yeniden markalamadan önceki kurulumlar için.
+    // Exe adları: yeni ad önce. Eski adlar ("31Hane.exe", "Ekip.Uygulama.exe") önceki kurulumlar için.
     // Paket hangi adla gelirse onu açarız; ad değiştiyse eski exe ".eski" olur ve sonraki açılışta silinir.
-    private static readonly string[] ExeAdlari = ["31Hane.exe", "Ekip.Uygulama.exe"];
+    private static readonly string[] ExeAdlari = ["Uygulama.exe", "31Hane.exe", "Ekip.Uygulama.exe"];
 
     // Güncellenebilir kurulum mu? (Geliştirirken "dotnet run" ile açılınca exe'yi değiştirmeye çalışmayalım.)
     private static string? ExeYolu
@@ -42,10 +42,10 @@ public static class Guncelleyici
         }
     }
 
-    private static string GeciciKlasor => Path.Combine(Path.GetTempPath(), "31hane-guncelleme");
+    private static string GeciciKlasor => Path.Combine(Path.GetTempPath(), "uygulama-guncelleme");
 
     // Önceki güncellemeden kalan eski exe'yi ve indirme klasörünü sil (açılışta çağrılır).
-    // Ayrıca eski adla ("Ekip.Uygulama.exe") çalışıyorsak dosyayı "31Hane.exe" yapar: tek dosyalık exe adından
+    // Ayrıca eski adlardan biriyle ("31Hane.exe", "Ekip.Uygulama.exe") çalışıyorsak dosyayı "Uygulama.exe" yapar: tek dosyalık exe adından
     // bağımsız çalışır, çalışan exe Windows'ta yeniden adlandırılabilir. Bir sonraki açılış yeni adla olur.
     public static void EskileriTemizle()
     {
@@ -77,7 +77,7 @@ public static class Guncelleyici
             if (b is null || !Version.TryParse(b.Surum, out var yeni)) return (null, "Sürüm bilgisi okunamadı.");
             var mevcut = MevcutSurum;
             if (new Version(yeni.Major, yeni.Minor, Math.Max(0, yeni.Build)) <= new Version(mevcut.Major, mevcut.Minor, Math.Max(0, mevcut.Build))) return (null, null);
-            // "indir" göreli olabilir (ör. "31Hane-1.0.1.zip"): son.json'un bulunduğu yere göre çözülür.
+            // "indir" göreli olabilir (ör. "Uygulama-1.0.1.zip"): son.json'un bulunduğu yere göre çözülür.
             if (!Uri.TryCreate(new Uri(adres), b.Indir, out var indir) || indir.Scheme is not ("https" or "http")) return (null, "Sürüm bilgisi okunamadı.");
             return (b with { Indir = indir.ToString() }, null);
         }

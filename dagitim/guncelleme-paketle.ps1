@@ -1,5 +1,5 @@
 ﻿# Otomatik güncelleme paketi hazırlar:
-#   yayin/guncelleme/31Hane-<sürüm>.zip  -> uygulamanın kendisi (tek exe)
+#   yayin/guncelleme/Uygulama-<sürüm>.zip  -> uygulamanın kendisi (tek exe)
 #   yayin/guncelleme/son.json          -> { surum, indir, sha256, notlar }
 # Bu iki dosya GitHub Release'ine eklenince (surum.yml yapar) uygulamalar yeni sürümü kendileri bulur.
 #
@@ -28,7 +28,7 @@ dotnet publish (Join-Path $kok "Ekip.Uygulama") -c Release -r win-x64 --self-con
 if ($LASTEXITCODE -ne 0) { throw "Derleme başarısız" }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zipAdi = "31Hane-$Surum.zip"
+$zipAdi = "Uygulama-$Surum.zip"
 $zip = Join-Path $cikti $zipAdi
 [IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
 $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -37,10 +37,10 @@ $indir = if ($IndirmeTabani) { $IndirmeTabani.TrimEnd('/') + "/" + $zipAdi } els
 $bilgi = [ordered]@{ surum = $Surum; indir = $indir; sha256 = $sha; notlar = $Notlar }
 [IO.File]::WriteAllText((Join-Path $cikti "son.json"), ($bilgi | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 
-# İlk kurulum paketi: aynı exe, görünen adıyla (31Hane.exe). Güncelleme paketi eski adı korur, çünkü eski sürümlerin
-# güncelleyicisi pakette "Ekip.Uygulama.exe" arar; uygulama ilk açılışta dosyasını kendisi 31Hane.exe yapar.
-Rename-Item -LiteralPath (Join-Path $dosyalar "Ekip.Uygulama.exe") "31Hane.exe"
-[IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, (Join-Path $cikti "31Hane-Windows.zip"), [IO.Compression.CompressionLevel]::Optimal, $false)
+# İlk kurulum paketi: aynı exe, görünen adıyla (Uygulama.exe). Güncelleme paketi eski adı korur, çünkü eski sürümlerin
+# güncelleyicisi pakette "Ekip.Uygulama.exe" arar; uygulama ilk açılışta dosyasını kendisi Uygulama.exe yapar.
+Rename-Item -LiteralPath (Join-Path $dosyalar "Ekip.Uygulama.exe") "Uygulama.exe"
+[IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, (Join-Path $cikti "Uygulama-Windows.zip"), [IO.Compression.CompressionLevel]::Optimal, $false)
 Remove-Item -LiteralPath $dosyalar -Recurse -Force
 
 $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)

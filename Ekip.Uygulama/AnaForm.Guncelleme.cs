@@ -28,7 +28,7 @@ public partial class AnaForm
         _bekleyenGuncelleme = b;
         if (Visible && WindowState != FormWindowState.Minimized) await GuncellemeSor();
         else _tepsi?.ShowBalloonTip(5000, $"{Tema.UygulamaAdi} güncellemesi hazır",
-            $"Sürüm {b.Surum} çıktı. Güncellemek için {Tema.UygulamaAdi} uygulamasını aç.", ToolTipIcon.None);
+            $"Sürüm {b.Surum} çıktı. Güncellemek için uygulamayı aç.", ToolTipIcon.None);
     }
 
     // Ayarlar > Hakkında > "Güncellemeleri denetle". Daha önce "Vazgeç" denen sürüm de tekrar sorulur.

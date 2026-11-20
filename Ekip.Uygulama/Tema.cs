@@ -34,7 +34,7 @@ public static class Tema
     public static readonly System.Globalization.CultureInfo Turkce = new("tr-TR");
 
     // Uygulamanın görünen adı. Her yerde bunu kullan (pencere başlığı, tepsi, bildirimler).
-    public const string UygulamaAdi = "31Hane";
+    public const string UygulamaAdi = "Uygulama";
 
     // Uygulama ikonu: Varliklar\31hane.ico (exe'nin içine gömülü). Windows ihtiyaç duyduğu boyutu kendisi seçer.
     private static Icon? _ikon;

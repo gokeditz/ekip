@@ -86,7 +86,7 @@ public class GirisFormu : TemaliForm
     {
         _kayitModu = kayit;
         _baslik.Text = kayit ? "Hesap oluştur" : "Tekrar hoş geldin!";
-        _altBaslik.Text = kayit ? "Birkaç saniye sürer, sonra haneye katıl." : "Hane seni bekliyor.";
+        _altBaslik.Text = kayit ? "Birkaç saniye sürer, sonra aramıza katıl." : "Arkadaşların seni bekliyor.";
         _gonder.Text = kayit ? "Kayıt ol" : "Giriş yap";
         _modSoru.Text = kayit ? "Zaten hesabın var mı?" : "Hesabın yok mu?";
         _modDegistir.Text = kayit ? "Giriş yap" : "Kayıt ol";
@@ -183,7 +183,7 @@ public class GirisFormu : TemaliForm
         var uri = new Uri(_ayarlar.SunucuAdresi);
         // Varsayılan sunucuda teknik adres yerine marka adı (adres Cloudflare'daki eski adla kaldı).
         bool varsayilan = _ayarlar.SunucuAdresi.TrimEnd('/') == Ayarlar.VarsayilanSunucu;
-        _sunucuAyari.Text = varsayilan ? $"Sunucu: {Tema.UygulamaAdi} bulutu" : $"Sunucu: {uri.Authority}";
+        _sunucuAyari.Text = varsayilan ? "Sunucu: bulut" : $"Sunucu: {uri.Authority}";
         PerformLayout();
     }
 

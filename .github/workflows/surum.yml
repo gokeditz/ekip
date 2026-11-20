@@ -1,8 +1,8 @@
 # Yeni sürüm: "v1.0.1" gibi bir etiket gönderince (git tag v1.0.1 && git push origin v1.0.1)
 #  1) Uygulama Windows için tek exe olarak derlenir. (Sunucu Cloudflare'da: Ekip.Bulut, "npx wrangler deploy".)
 #  2) GitHub'da bir "Release" oluşturulur. İçinde:
-#       31Hane-Windows.zip          -> ilk kurulum (arkadaşlara bu link verilir)
-#       31Hane-<sürüm>.zip + son.json -> otomatik güncelleme; açık olan tüm uygulamalar 30 dakika içinde
+#       Uygulama-Windows.zip          -> ilk kurulum (arkadaşlara bu link verilir)
+#       Uygulama-<sürüm>.zip + son.json -> otomatik güncelleme; açık olan tüm uygulamalar 30 dakika içinde
 #                                    (ya da bir sonraki açılışta) yeni sürümü görüp güncellemeyi sorar
 name: Sürüm
 
@@ -40,12 +40,12 @@ jobs:
         run: |
           ./dagitim/guncelleme-paketle.ps1 -Surum "${{ steps.surum.outputs.no }}" -Notlar $env:GUNCELLEME_NOTU -Cikti yayin/guncelleme `
             -IndirmeTabani "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-          Move-Item yayin/guncelleme/31Hane-Windows.zip 31Hane-Windows.zip
+          Move-Item yayin/guncelleme/Uygulama-Windows.zip Uygulama-Windows.zip
 
       - name: Release oluştur
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" --title "31Hane ${{ github.ref_name }}" --generate-notes `
-            31Hane-Windows.zip "yayin/guncelleme/31Hane-${{ steps.surum.outputs.no }}.zip" yayin/guncelleme/son.json
+          gh release create "${{ github.ref_name }}" --title "Uygulama ${{ github.ref_name }}" --generate-notes `
+            Uygulama-Windows.zip "yayin/guncelleme/Uygulama-${{ steps.surum.outputs.no }}.zip" yayin/guncelleme/son.json
