@@ -61,6 +61,14 @@ public class GirisFormu : TemaliForm
         Mesgul(true, "Oturum açılıyor…");
         var api = new Api(_ayarlar.SunucuAdresi) { Token = token };
         var sonuc = await api.Ben();
+        // İnternet/sunucu bir anlık cevap vermediyse oturum geçersiz değildir: giriş ekranına düşmeden tekrar dene.
+        for (int deneme = 1; !sonuc.Basarili && sonuc.Durum is null && deneme <= 4 && !IsDisposed; deneme++)
+        {
+            Mesgul(true, $"Sunucuya bağlanılıyor… ({deneme + 1}. deneme)");
+            await Task.Delay(TimeSpan.FromSeconds(deneme * 2));
+            sonuc = await api.Ben();
+        }
+        if (IsDisposed) return;
         if (sonuc.Basarili) { GirisYapildi?.Invoke(api, sonuc.Veri!); return; }
 
         Mesgul(false);

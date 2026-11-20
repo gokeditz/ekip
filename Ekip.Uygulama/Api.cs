@@ -16,7 +16,8 @@ public class Api
     public Api(string sunucuAdresi)
     {
         SunucuAdresi = sunucuAdresi.TrimEnd('/');
-        _http = new HttpClient { BaseAddress = new Uri(SunucuAdresi + "/"), Timeout = TimeSpan.FromSeconds(10) };
+        _http = Ag.Istemci(TimeSpan.FromSeconds(15));
+        _http.BaseAddress = new Uri(SunucuAdresi + "/");
     }
 
     public string SunucuAdresi { get; }
@@ -136,7 +137,7 @@ public class Api
     public string TamAdres(string url) => url.StartsWith('/') ? SunucuAdresi + url : url;
 
     // Uzun süren aktarımlar için ayrı istemci (normal istekler 10 sn'de zaman aşımına uğrar).
-    private static readonly HttpClient Aktarim = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient Aktarim = Ag.Istemci(Timeout.InfiniteTimeSpan);
 
     public async Task<Sonuc<Ek>> DosyaYukle(string yol, string mime, IProgress<double>? ilerleme = null, CancellationToken iptal = default)
     {

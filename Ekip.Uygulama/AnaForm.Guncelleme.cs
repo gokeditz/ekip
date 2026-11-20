@@ -31,6 +31,22 @@ public partial class AnaForm
             $"Sürüm {b.Surum} çıktı. Güncellemek için {Tema.UygulamaAdi} uygulamasını aç.", ToolTipIcon.None);
     }
 
+    // Ayarlar > Hakkında > "Güncellemeleri denetle". Daha önce "Vazgeç" denen sürüm de tekrar sorulur.
+    private async Task GuncellemeyiElleDenetle()
+    {
+        var panel = _ayarlarSayfasi.Hakkinda;
+        if (_guncelleniyor) { panel.DurumAyarla("Güncelleme zaten yükleniyor…", mesgul: true); return; }
+        panel.DurumAyarla("Denetleniyor…", mesgul: true);
+        var (yeni, hata) = await Guncelleyici.Denetle(Ayarlar.GuncellemeAdresi);
+        if (IsDisposed) return;
+        if (hata != null) { panel.DurumAyarla(hata, hata: true); return; }
+        if (yeni is null) { panel.DurumAyarla("En son sürümü kullanıyorsun."); return; }
+        panel.DurumAyarla($"Yeni sürüm bulundu: {yeni.Surum}");
+        _reddedilenSurum = null;
+        _bekleyenGuncelleme = yeni;
+        await GuncellemeSor();
+    }
+
     // Pencere tepsiden açılınca bekleyen güncelleme varsa sor.
     private void BekleyenGuncellemeyiSor()
     {

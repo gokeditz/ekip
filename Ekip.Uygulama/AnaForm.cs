@@ -74,6 +74,7 @@ public partial class AnaForm : TemaliForm
             _ayarlar.Kaydet();
             KisayollariYukle();
         };
+        _ayarlarSayfasi.Hakkinda.GuncellemeDenetle += async () => await GuncellemeyiElleDenetle();
         kp.MiniyiSifirla += () =>
         {
             _ayarlar.MiniAlan = null;

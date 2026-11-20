@@ -13,6 +13,7 @@ public class AyarlarSayfasi : Control
     private readonly HakkindaPaneli _hakkinda = new();
 
     public KisayolPaneli Kisayollar => _kisayollar;
+    public HakkindaPaneli Hakkinda => _hakkinda;
 
     public AyarlarSayfasi(Control profilDuzenleyici, KisayolPaneli kisayollar)
     {
@@ -88,13 +89,41 @@ public class AyarlarSayfasi : Control
     protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); if (Bul(e.Location) is { } s) Sec(s); }
 }
 
-// Ayarlar > Hakkında: sürüm ve kullanılan açık kaynak içeriklerin atıfları.
+// Ayarlar > Hakkında: sürüm, güncelleme denetimi ve kullanılan açık kaynak içeriklerin atıfları.
 public class HakkindaPaneli : Control
 {
+    private readonly Dugme _denetle = new() { Text = "Güncellemeleri denetle", Tur = Dugme.Turler.Ikincil };
+    private string? _durum;
+    private bool _durumHata;
+
+    // Ana pencere dinler: denetler, yeni sürüm varsa her zamanki "Yeni sürüm hazır" kartını açar.
+    public event Action? GuncellemeDenetle;
+
     public HakkindaPaneli()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         BackColor = Tema.Arkaplan;
+        Controls.Add(_denetle);
+        _denetle.Click += (_, _) => GuncellemeDenetle?.Invoke();
+    }
+
+    // Düğmenin altında kısa durum yazısı ("Denetleniyor…", "En son sürümü kullanıyorsun." ...). null = yok.
+    public void DurumAyarla(string? yazi, bool hata = false, bool mesgul = false)
+    {
+        _durum = yazi;
+        _durumHata = hata;
+        _denetle.Enabled = !mesgul;
+        Invalidate();
+    }
+
+    private int SurumY => Tema.S(26) + Tema.S(36) + Tema.S(34);
+
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        base.OnLayout(e);
+        int x = Tema.S(32), w = Math.Min(Tema.S(760), Width - x * 2);
+        int dw = TextRenderer.MeasureText(_denetle.Text, _denetle.Font).Width + Tema.S(36);
+        _denetle.Bounds = new Rectangle(x + w - dw, SurumY + Tema.S(18), dw, Tema.S(40));
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -104,8 +133,18 @@ public class HakkindaPaneli : Control
         int x = Tema.S(32), y = Tema.S(26), w = Math.Min(Tema.S(760), Width - x * 2);
         TextRenderer.DrawText(g, "Hakkında", Tema.Yazi(16, kalin: true), new Point(x - Tema.S(5), y), Tema.Metin, TextFormatFlags.NoPadding);
         y += Tema.S(36);
-        TextRenderer.DrawText(g, "Ekip'i oyun oynarken arkadaşlarınla yazışmak için yaptık: hafif, hızlı, sade.", Tema.Yazi(10), new Rectangle(x - Tema.S(3), y, w, Tema.S(22)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, $"{Tema.UygulamaAdi}'yi oyun oynarken arkadaşlarınla yazışmak için yaptık: hafif, hızlı, sade.", Tema.Yazi(10), new Rectangle(x - Tema.S(3), y, w, Tema.S(22)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         y += Tema.S(34);
+
+        // Sürüm satırı: solda sürüm, sağda düğme, altında durum.
+        using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, x, y, x + w, y);
+        int metinW = w - _denetle.Width - Tema.S(16);
+        TextRenderer.DrawText(g, "Sürüm", Tema.Yazi(10.5f, kalin: true), new Point(x, y + Tema.S(14)), Tema.Metin, TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, Tema.UygulamaAdi + " " + Guncelleyici.MevcutSurumYazisi, Tema.Yazi(9.5f), new Rectangle(x, y + Tema.S(38), metinW, Tema.S(20)), Tema.MetinIkincil, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        if (_durum != null)
+            TextRenderer.DrawText(g, _durum, Tema.Yazi(9.5f, kalin: true), new Rectangle(x, y + Tema.S(60), w, Tema.S(20)),
+                _durumHata ? Tema.Hata : Tema.Basari, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        y += Tema.S(96);
 
         void Satir(string baslik, string metin)
         {
@@ -114,8 +153,7 @@ public class HakkindaPaneli : Control
             TextRenderer.DrawText(g, metin, Tema.Yazi(9.5f), new Rectangle(x, y + Tema.S(38), w, Tema.S(40)), Tema.MetinIkincil, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
             y += Tema.S(78);
         }
-        Satir("Sürüm", Tema.UygulamaAdi + " " + Guncelleyici.MevcutSurumYazisi);
-        Satir("Emoji", "Emoji: Twemoji © Twitter / jdecked, CC-BY 4.0");
+        Satir("Emoji", "Twemoji © Twitter / jdecked, CC-BY 4.0");
     }
 }
 

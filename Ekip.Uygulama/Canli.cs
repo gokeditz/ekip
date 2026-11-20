@@ -35,7 +35,13 @@ public sealed class Canli : IAsyncDisposable
     {
         _ui = SynchronizationContext.Current ?? throw new InvalidOperationException("Arayüz iş parçacığında oluşturulmalı.");
         _baglanti = new HubConnectionBuilder()
-            .WithUrl(api.SunucuAdresi + "/hub", o => o.AccessTokenProvider = () => Task.FromResult(api.Token))
+            .WithUrl(api.SunucuAdresi + "/hub", o =>
+            {
+                o.AccessTokenProvider = () => Task.FromResult(api.Token);
+                // Bağlantılar IPv4 öncelikli kurulsun (bkz. Ag.cs).
+                o.HttpMessageHandlerFactory = _ => new IsleyiciSarmali();
+                o.WebSocketFactory = (c, iptal) => Ag.WebSocketAc(c.Uri, api.Token, iptal);
+            })
             .WithAutomaticReconnect(new SonsuzDeneme())
             .Build();
 
@@ -147,6 +153,14 @@ public sealed class Canli : IAsyncDisposable
     {
         _kapandi = true;
         await _baglanti.DisposeAsync();
+    }
+
+    // SignalR verdiği işleyiciyi atınca ortak havuz kapanmasın diye ince bir sarmalayıcı.
+    private sealed class IsleyiciSarmali() : DelegatingHandler(new IsleyiciSahibi());
+    private sealed class IsleyiciSahibi : HttpMessageHandler
+    {
+        private static readonly HttpMessageInvoker Ortak = new(Ag.Isleyici, disposeHandler: false);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken c) => Ortak.SendAsync(r, c);
     }
 
     private class SonsuzDeneme : IRetryPolicy

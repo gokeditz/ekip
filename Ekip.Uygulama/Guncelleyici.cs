@@ -15,7 +15,7 @@ public static class Guncelleyici
 {
     public record SurumBilgisi(string Surum, string Indir, string? Sha256, string? Notlar);
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly HttpClient Http = Ag.Istemci(TimeSpan.FromMinutes(10));
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static Version MevcutSurum =>
@@ -34,6 +34,8 @@ public static class Guncelleyici
         {
             var yol = Environment.ProcessPath;
             if (yol is null || !ExeAdlari.Contains(Path.GetFileName(yol), StringComparer.OrdinalIgnoreCase)) return null;
+            // Geliştirme derlemesi (bin\Debug): yanında dll'ler var, tek dosyalık kurulum değil. Onu güncellemeyelim.
+            if (File.Exists(Path.Combine(Path.GetDirectoryName(yol)!, "Ekip.Uygulama.dll"))) return null;
             // Bu oturumda yeni ada çevrildiyse dosya artık yeni adda.
             var yeni = Path.Combine(Path.GetDirectoryName(yol)!, ExeAdlari[0]);
             return File.Exists(yol) || !File.Exists(yeni) ? yol : yeni;
@@ -60,21 +62,26 @@ public static class Guncelleyici
         try { if (Directory.Exists(GeciciKlasor)) Directory.Delete(GeciciKlasor, true); } catch { }
     }
 
-    public static async Task<SurumBilgisi?> Kontrol(string adres)
+    // Arka plan denetimi: yeni sürüm varsa bilgisi, yoksa (ya da hata olursa) null.
+    public static async Task<SurumBilgisi?> Kontrol(string adres) => (await Denetle(adres)).Yeni;
+
+    // Elle denetim için ayrıntılı sonuç: Yeni dolu = güncelleme var; Hata dolu = denetlenemedi; ikisi de null = güncelsin.
+    public static async Task<(SurumBilgisi? Yeni, string? Hata)> Denetle(string adres)
     {
-        if (string.IsNullOrWhiteSpace(adres) || ExeYolu is null) return null;
+        if (string.IsNullOrWhiteSpace(adres)) return (null, "Güncelleme adresi ayarlı değil.");
+        if (ExeYolu is null) return (null, "Bu kurulum otomatik güncellenemiyor (geliştirme sürümü).");
         try
         {
-            using var zaman = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var zaman = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             var b = await Http.GetFromJsonAsync<SurumBilgisi>(adres + (adres.Contains('?') ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks, Json, zaman.Token);
-            if (b is null || !Version.TryParse(b.Surum, out var yeni)) return null;
+            if (b is null || !Version.TryParse(b.Surum, out var yeni)) return (null, "Sürüm bilgisi okunamadı.");
             var mevcut = MevcutSurum;
-            if (new Version(yeni.Major, yeni.Minor, Math.Max(0, yeni.Build)) <= new Version(mevcut.Major, mevcut.Minor, Math.Max(0, mevcut.Build))) return null;
+            if (new Version(yeni.Major, yeni.Minor, Math.Max(0, yeni.Build)) <= new Version(mevcut.Major, mevcut.Minor, Math.Max(0, mevcut.Build))) return (null, null);
             // "indir" göreli olabilir (ör. "31Hane-1.0.1.zip"): son.json'un bulunduğu yere göre çözülür.
-            if (!Uri.TryCreate(new Uri(adres), b.Indir, out var indir) || indir.Scheme is not ("https" or "http")) return null;
-            return b with { Indir = indir.ToString() };
+            if (!Uri.TryCreate(new Uri(adres), b.Indir, out var indir) || indir.Scheme is not ("https" or "http")) return (null, "Sürüm bilgisi okunamadı.");
+            return (b with { Indir = indir.ToString() }, null);
         }
-        catch { return null; } // İnternet yoksa ya da dosya bozuksa sessizce geç.
+        catch { return (null, "Güncelleme sunucusuna ulaşılamadı. İnternetini kontrol edip tekrar dene."); }
     }
 
     // İndir, doğrula, değiştir, yeniden başlat. Başarılıysa geri dönmez (uygulama kapanır). Hata olursa mesaj döner.
