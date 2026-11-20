@@ -36,6 +36,11 @@ $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $indir = if ($IndirmeTabani) { $IndirmeTabani.TrimEnd('/') + "/" + $zipAdi } else { $zipAdi }
 $bilgi = [ordered]@{ surum = $Surum; indir = $indir; sha256 = $sha; notlar = $Notlar }
 [IO.File]::WriteAllText((Join-Path $cikti "son.json"), ($bilgi | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+
+# İlk kurulum paketi: aynı exe, görünen adıyla (31Hane.exe). Güncelleme paketi eski adı korur, çünkü eski sürümlerin
+# güncelleyicisi pakette "Ekip.Uygulama.exe" arar; uygulama ilk açılışta dosyasını kendisi 31Hane.exe yapar.
+Rename-Item -LiteralPath (Join-Path $dosyalar "Ekip.Uygulama.exe") "31Hane.exe"
+[IO.Compression.ZipFile]::CreateFromDirectory($dosyalar, (Join-Path $cikti "31Hane-Windows.zip"), [IO.Compression.CompressionLevel]::Optimal, $false)
 Remove-Item -LiteralPath $dosyalar -Recurse -Force
 
 $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)

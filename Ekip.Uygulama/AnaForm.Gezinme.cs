@@ -14,6 +14,7 @@ public partial class AnaForm
     private UyeListesi _uyeListesi = null!;
     private KonusmaBasligi _konusmaBasligi = null!;
     private BosDurum _konusmaYeri = null!;
+    private SohbetPaneli _konusmaPaneli = null!;
     private KesfetSayfasi _kesfet = null!;
     private SunucuAyarlari _sunucuAyarlari = null!;
     private IkonOnbellek _ikonlar = null!;
@@ -50,8 +51,16 @@ public partial class AnaForm
         _konusmaYeri = new BosDurum { Visible = false, Glif = Glif.Mesaj, Baslik = "Sohbet yükleniyor…", Aciklama = "" };
         _kesfet = new KesfetSayfasi(_api, _avatarlar, _ikonlar) { Visible = false };
         _sunucuAyarlari = new SunucuAyarlari(_api, _avatarlar, _ikonlar) { Visible = false };
+        // Kanal ve grup sohbeti: DM'lerle aynı depo; başlığı _konusmaBasligi çizer.
+        _konusmaPaneli = new SohbetPaneli { BaslikGizli = true, Api = _api, Avatarlar = _avatarlar, Depo = _depo, Ben = _ben, Visible = false };
+        _konusmaPaneli.Bildirim += (m, h) => Bildir(m, h);
+        _konusmaPaneli.BahsetmeTik += ad =>
+        {
+            if (_acikKonusma is { } k && KonusmaUyeleri(k).FirstOrDefault(p => p.KullaniciAdi.Equals(ad, StringComparison.OrdinalIgnoreCase)) is { } p)
+                ProfilGoster(p, Rectangle.Empty);
+        };
         _rayYenileme = new System.Windows.Forms.Timer { Interval = 1500 };
-        Controls.AddRange([_rayi, _kanalListesi, _uyeListesi, _konusmaBasligi, _konusmaYeri, _kesfet, _sunucuAyarlari]);
+        Controls.AddRange([_rayi, _kanalListesi, _uyeListesi, _konusmaBasligi, _konusmaYeri, _konusmaPaneli, _kesfet, _sunucuAyarlari]);
         _kenar.Ikonlar = _ikonlar;
         _ekle.Ben = _ben;
         _gezinmeHazir = true;
@@ -96,7 +105,7 @@ public partial class AnaForm
         _kenar.GrupEkleTik += GrupOlustur;
         _kenar.ArkadaslarTik += () => { if (_acikKonusma is { Tur: KonusmaTuru.Grup }) { _acikKonusma = null; GorunumuAyarla(); ListeyiGoster(); } };
         _kenar.SohbetlerDegisti += AnaRozetiGuncelle;
-        _kenar.BenDegisti += () => _kanalListesi.Ben = _kenar.Ben;
+        _kenar.BenDegisti += () => { _kanalListesi.Ben = _kenar.Ben; if (_kenar.Ben is { } b) _konusmaPaneli.Ben = b; };
 
         // Canlı olaylar
         _canli.SunucularDegisti += () => _ = SunucularYenile();
@@ -141,7 +150,8 @@ public partial class AnaForm
         _kesfet.Visible = kesfet && !ustte;
         _sunucuAyarlari.Visible = sunucu && !ustte && _sunucuAyarAcik;
         _konusmaBasligi.Visible = grup || kanal;
-        _konusmaYeri.Visible = grup || kanal;
+        _konusmaYeri.Visible = false;
+        _konusmaPaneli.Visible = grup || kanal;
         if (!kanal) _uyeListesi.Visible = false;
 
         if (!ana || grup) { _ust.Visible = false; _arkadaslar.Visible = _bos.Visible = _baslik.Visible = _ekle.Visible = false; }
@@ -165,7 +175,7 @@ public partial class AnaForm
         int uw = uyeler ? UyeListesi.GerekenGenislik : 0, sohbetW = sagW - uw, bh = KonusmaBasligi.GerekenYukseklik;
         _konusmaBasligi.UyeDugmesi = sigar;
         _konusmaBasligi.Bounds = new Rectangle(x, y, sohbetW, bh);
-        _konusmaYeri.Bounds = new Rectangle(x, y + bh, sohbetW, Math.Max(0, ic - bh));
+        _konusmaYeri.Bounds = _konusmaPaneli.Bounds = new Rectangle(x, y + bh, sohbetW, Math.Max(0, ic - bh));
         _uyeListesi.Bounds = new Rectangle(x + sohbetW, y, uw, ic);
         if (_uyeListesi.Visible != uyeler) _uyeListesi.Visible = uyeler;
     }
@@ -375,18 +385,33 @@ public partial class AnaForm
     }
 
     // Bir kanal ya da grup konuşmasını içerik alanında gösterir (DM'ler SohbetAc ile açılır).
-    // TODO(organizatör): SohbetDeposu/SohbetPaneli ile bağlanacak. Şimdilik başlık çubuğu + "Sohbet yükleniyor…" yer tutucusu var;
-    // sohbet paneli _konusmaYeri'nin yerine (aynı Bounds'a) konup k için açılmalı. Başlığın üstünde/altında kalan alanı GezinmeYerlestir ayarlar.
     private void KonusmaGoster(KonusmaKimligi k)
     {
         if (k.Tur == KonusmaTuru.Dm) { SohbetAc(k.Id); return; }
         _acikKonusma = k;
         BasligiGuncelle();
-        _konusmaYeri.Baslik = "Sohbet yükleniyor…";
-        _konusmaYeri.Aciklama = "";
-        _konusmaYeri.Invalidate();
-        KonusmaOkunduYap(k);
         GorunumuAyarla();
+        if (PanelBasligi(k) is { } baslik) _konusmaPaneli.Ac(k, baslik);
+        KonusmaOkunduYap(k);
+    }
+
+    // Sohbet panelinin başlık bilgisi (ipucu yazısı ve "konuşmanın başlangıcı" satırı bundan üretilir).
+    private SohbetBasligi? PanelBasligi(KonusmaKimligi k)
+    {
+        if (k.Tur == KonusmaTuru.Kanal && _sunucuOnbellek.Values.SelectMany(s => s.Kanallar).FirstOrDefault(x => x.Id == k.Id) is { } kanal)
+            return SohbetBasligi.Kanal(kanal.Ad, kanal.Konu);
+        if (k.Tur == KonusmaTuru.Grup && _gruplar.FirstOrDefault(x => x.Id == k.Id) is { } g)
+            return SohbetBasligi.Grup(GrupAdi(g), g.Renk, _ikonlar.Grup(g.Id, g.IkonSurum), g.Uyeler.Count);
+        return null;
+    }
+
+    // Açık kanal/grup sohbetinin üyelerini, yetkisini ve başlığını güncel tutar.
+    private void KonusmaPaneliTazele()
+    {
+        if (_acikKonusma is not { } k || k.Tur == KonusmaTuru.Dm) return;
+        _konusmaPaneli.Uyeler = KonusmaUyeleri(k);
+        _konusmaPaneli.BaskalarininMesajlariniSilebilir = KonusmadaSilebilir(k);
+        if (PanelBasligi(k) is { } b) _konusmaPaneli.BasligiGuncelle(b);
     }
 
     // Sohbet panelinin üye önerisi / bahsetme için kullanacağı üyeler.
@@ -408,6 +433,7 @@ public partial class AnaForm
             _konusmaBasligi.KanalGoster(kanal.Ad, kanal.Konu);
         else if (_acikKonusma is { Tur: KonusmaTuru.Grup } gk && _gruplar.FirstOrDefault(x => x.Id == gk.Id) is { } grup)
             _konusmaBasligi.GrupGoster(GrupAdi(grup), grup.Uyeler.Count, grup.Renk, _ikonlar.Grup(grup.Id, grup.IkonSurum));
+        KonusmaPaneliTazele();
     }
 
     private static string GrupAdi(Grup g) => string.IsNullOrWhiteSpace(g.Ad) ? string.Join(", ", g.Uyeler.Select(u => u.GorunenAd)) : g.Ad;
@@ -644,6 +670,7 @@ public partial class AnaForm
         _sunucu = s;
         _sunucuOnbellek[s.Id] = s;
         _uyeListesi.Uyeler = s.Uyeler;
+        KonusmaPaneliTazele();
     }
 
     // ---- Kimlik ----

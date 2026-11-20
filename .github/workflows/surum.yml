@@ -40,7 +40,7 @@ jobs:
         run: |
           ./dagitim/guncelleme-paketle.ps1 -Surum "${{ steps.surum.outputs.no }}" -Notlar $env:GUNCELLEME_NOTU -Cikti yayin/guncelleme `
             -IndirmeTabani "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-          Copy-Item "yayin/guncelleme/31Hane-${{ steps.surum.outputs.no }}.zip" 31Hane-Windows.zip
+          Move-Item yayin/guncelleme/31Hane-Windows.zip 31Hane-Windows.zip
 
       - name: Release oluştur
         shell: pwsh

@@ -679,13 +679,18 @@ public sealed class MesajListesi : Control
         if (oz.Silindi) { metin = "Orijinal mesaj silindi."; stil = FontStyle.Italic; }
         else
         {
-            metin = oz.Metin.Replace('\n', ' ');
+            metin = BicimiTemizle(oz.Metin.Replace('\n', ' '));
             if (oz.EkVar) metin = metin.Length == 0 ? "📎 Ek" : metin + " 📎";
             if (gercek?.Ekler is { Count: > 0 } ek && gercek.Metin.Length == 0) metin = MesajYardimci.EkOzeti(ek[0]);
         }
         if (x < r.Right)
             YanitMetniCiz(g, metin, stil, new Rectangle(x, r.Y, r.Right - x, r.Height), u);
     }
+
+    // Alıntıda **kalın**, *italik*, `kod`, ~~çizili~~ işaretleri görünmesin.
+    private static string BicimiTemizle(string s) =>
+        System.Text.RegularExpressions.Regex.Replace(s, @"\*\*(.+?)\*\*|~~(.+?)~~|`(.+?)`|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", m =>
+            m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Success ? m.Groups[3].Value : m.Groups[4].Value);
 
     // Tek satır yazı + renkli emoji (kısaltarak).
     private static void YanitMetniCiz(Graphics g, string metin, FontStyle stil, Rectangle alan, bool u)
@@ -1191,7 +1196,6 @@ public sealed class MesajListesi : Control
 
         int i = Bul(e.Location);
         var h = HedefBul(e.Location, i);
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "ekiptest", "dbg.txt"), $"{DateTime.Now:HH:mm:ss} up {e.Location} i={i} h={h.Tur} kay={_kaydirma} top={Top} H={Height}\n"); } catch { } // TEST-GECICI
         if (h.Tur == HedefTuru.AltaPil && e.Button == MouseButtons.Left) { Alta(); return; }
         if (i < 0 && h.Tur != HedefTuru.Arac) return;
         var o = h.Oge >= 0 ? _ogeler[h.Oge] : i >= 0 ? _ogeler[i] : null;
@@ -1225,12 +1229,6 @@ public sealed class MesajListesi : Control
 
     public event Action? YenidenYukleIstendi;
 
-    public void TestTikla(int x, int y, bool sag) // TEST-GECICI
-    {
-        var p = new Point(x, y);
-        FareyiIsle(p);
-        OnMouseUp(new MouseEventArgs(sag ? MouseButtons.Right : MouseButtons.Left, 1, x, y, 0));
-    }
 
     private static void Ac(string adres)
     {

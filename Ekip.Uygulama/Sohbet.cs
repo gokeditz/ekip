@@ -224,8 +224,6 @@ public sealed class SohbetPaneli : Control
     };
 
     public void Odaklan() => _yazma.Odaklan();
-    public void TestDosya(params string[] y) => _yazma.DosyalariEkle(y); // TEST-GECICI
-    public void TestTikla(int x, int y, bool sag = false) => _liste.TestTikla(x, y, sag); // TEST-GECICI
     public void Alta() => _liste.Alta();
     public void MesajaGit(long id) => _liste.MesajaGit(id);
 

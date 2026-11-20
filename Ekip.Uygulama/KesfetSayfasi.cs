@@ -137,7 +137,7 @@ public class KesfetSayfasi : Control
             case Durum2.Bos:
                 bool arama = _ara.Text.Trim().Length > 0;
                 _bos.Glif = Glif.Ara;
-                if (_sekme == Sekme.Kisiler) { _bos.Baslik = arama ? "Kimse bulunamadı" : "Henüz kimse yok"; _bos.Aciklama = arama ? "Başka bir ad, @kullanıcıadı ya da #numara dene." : "Ekibe yeni biri katılınca burada görünür."; }
+                if (_sekme == Sekme.Kisiler) { _bos.Baslik = arama ? "Kimse bulunamadı" : "Henüz kimse yok"; _bos.Aciklama = arama ? "Başka bir ad, @kullanıcıadı ya da #numara dene." : "Haneye yeni biri katılınca burada görünür."; }
                 else { _bos.Baslik = arama ? "Sunucu bulunamadı" : "Henüz herkese açık sunucu yok"; _bos.Aciklama = arama ? "Başka bir arama dene." : "Bir sunucu kurup \"Keşfet'te görünsün\" dersen ilk sen olursun."; }
                 break;
         }

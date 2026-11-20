@@ -33,16 +33,28 @@ public static class Guncelleyici
         get
         {
             var yol = Environment.ProcessPath;
-            return yol != null && ExeAdlari.Contains(Path.GetFileName(yol), StringComparer.OrdinalIgnoreCase) ? yol : null;
+            if (yol is null || !ExeAdlari.Contains(Path.GetFileName(yol), StringComparer.OrdinalIgnoreCase)) return null;
+            // Bu oturumda yeni ada çevrildiyse dosya artık yeni adda.
+            var yeni = Path.Combine(Path.GetDirectoryName(yol)!, ExeAdlari[0]);
+            return File.Exists(yol) || !File.Exists(yeni) ? yol : yeni;
         }
     }
 
     private static string GeciciKlasor => Path.Combine(Path.GetTempPath(), "31hane-guncelleme");
 
     // Önceki güncellemeden kalan eski exe'yi ve indirme klasörünü sil (açılışta çağrılır).
+    // Ayrıca eski adla ("Ekip.Uygulama.exe") çalışıyorsak dosyayı "31Hane.exe" yapar: tek dosyalık exe adından
+    // bağımsız çalışır, çalışan exe Windows'ta yeniden adlandırılabilir. Bir sonraki açılış yeni adla olur.
     public static void EskileriTemizle()
     {
         if (ExeYolu is not { } exe) return;
+        try
+        {
+            var yeni = Path.Combine(Path.GetDirectoryName(exe)!, ExeAdlari[0]);
+            if (!Path.GetFileName(exe).Equals(ExeAdlari[0], StringComparison.OrdinalIgnoreCase) && !File.Exists(yeni))
+                File.Move(exe, yeni);
+        }
+        catch { /* Klasöre yazılamıyorsa eski adla devam. */ }
         try { foreach (var f in Directory.GetFiles(Path.GetDirectoryName(exe)!, "*.eski")) File.Delete(f); }
         catch { /* Kullanımdaysa bir sonraki açılışta silinir. */ }
         try { if (Directory.Exists(GeciciKlasor)) Directory.Delete(GeciciKlasor, true); } catch { }

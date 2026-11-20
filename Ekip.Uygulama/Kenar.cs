@@ -114,7 +114,7 @@ public class KenarCubugu : Control
         // Logo
         var logo = new Rectangle(Tema.S(18), Tema.S(16), Tema.S(28), Tema.S(28));
         Tema.Logo(g, logo);
-        TextRenderer.DrawText(g, "ekip", Tema.Yazi(12.5f, kalin: true), new Rectangle(logo.Right + Tema.S(10), logo.Y, Tema.S(120), logo.Height), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, Tema.UygulamaAdi, Tema.Yazi(12.5f, kalin: true), new Rectangle(logo.Right + Tema.S(10), logo.Y, Tema.S(120), logo.Height), Tema.Metin, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         using (var p = new Pen(Tema.Kenar)) g.DrawLine(p, 0, Tema.S(60), Width, Tema.S(60));
 
         // Arkadaşlar

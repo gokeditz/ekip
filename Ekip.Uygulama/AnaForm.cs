@@ -85,7 +85,7 @@ public partial class AnaForm : TemaliForm
             }
         };
 
-        Text = "Ekip";
+        Text = Tema.UygulamaAdi;
         ClientSize = new Size(Tema.S(1180), Tema.S(720));
         MinimumSize = new Size(Tema.S(1040), Tema.S(600)); // sunucu rayı (72) + kenar çubuğu (248) + sohbet + üye listesi sığsın
 
@@ -131,22 +131,6 @@ public partial class AnaForm : TemaliForm
         GuncellemeyiBaslat();
         _ = GezinmeYukle();
         await Yenile();
-        if (Environment.GetEnvironmentVariable("EKIP_SCRIPT") is { } sc) // TEST-GECICI
-        {
-            SohbetAc(2);
-            foreach (var a in sc.Split(';'))
-            {
-                if (a[0] == 'W') await Task.Delay(int.Parse(a[1..]) * 1000);
-                else if (a[0] == 'G') _depo.Gonder(Dm(2), a[2..]);
-                else if (a[0] == 'T') { var k = a[2..].Split(','); _sohbet.TestTikla(int.Parse(k[0]), int.Parse(k[1]), k.Length > 2); }
-            }
-        }
-        if (Environment.GetEnvironmentVariable("EKIP_TEST3") is { } tk) // TEST-GECICI
-        {
-            SohbetAc(2); await Task.Delay(2500);
-            foreach (var t in tk.Split(';')) { var a = t.Split(','); _sohbet.TestTikla(int.Parse(a[0]), int.Parse(a[1]), a.Length > 2); await Task.Delay(2500); }
-        }
-        if (Environment.GetEnvironmentVariable("EKIP_TEST") is { } tp) { SohbetAc(2); await Task.Delay(1500); _sohbet.TestDosya(tp.Split(';')); } // TEST-GECICI
     }
 
     // Yönetim sayfası sadece adminlere görünür. Sunucu admin değilse 403 döner.
@@ -241,16 +225,16 @@ public partial class AnaForm : TemaliForm
     // DM mantığı SohbetDeposu + SohbetPaneli'nde. Burada sadece kenar çubuğu listesi ve "şu an bakıyor muyum" bilgisi var.
 
     // Konuşma şu an gözüyle görüyor mu? (ana pencerede açık ve odakta, ya da overlay/mini sohbette açık)
-    // Kanal/grup eklerken buraya kendi "aktif konuşma" kontrolünü ekle.
-    private bool Goruyor(KonusmaKimligi k) =>
-        k.Tur == KonusmaTuru.Dm && ((_aktif == k.Id && ActiveForm == this) || OverlayDmGoruyor(k.Id) || MiniDmGoruyor(k.Id));
+    private bool Goruyor(KonusmaKimligi k) => k.Tur == KonusmaTuru.Dm
+        ? (_aktif == k.Id && ActiveForm == this) || OverlayDmGoruyor(k.Id) || MiniDmGoruyor(k.Id)
+        : _gezinmeHazir && KonusmaGorunuyor(k);
 
     private void KenariGuncelle()
     {
         _kenar.Sohbetler = _sohbetler.Select(x => x with { Okunmamis = _depo.Okunmamis(Dm(x.Karsi.Id)) }).ToList();
         _kenar.Secili = _aktif;
         int toplam = _depo.ToplamDmOkunmamis;
-        Text = toplam > 0 ? $"({toplam}) Ekip" : "Ekip";
+        Text = toplam > 0 ? $"({toplam}) {Tema.UygulamaAdi}" : Tema.UygulamaAdi;
     }
 
     private void SohbetAc(long id)

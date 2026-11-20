@@ -349,7 +349,7 @@ public partial class AnaForm
 
         _perde!.Bounds = ekran;
         _perde.Show();
-        _overlay.Ac(ekran, on == Handle ? "Ekip" : Pencereler.Baslik(on));
+        _overlay.Ac(ekran, on == Handle ? Tema.UygulamaAdi : Pencereler.Baslik(on));
         _overlay.SabitDurumunuYenile();
         if (_mini != null)
         {
@@ -405,10 +405,10 @@ public partial class AnaForm
     private void TepsiKur()
     {
         var menu = new KoyuMenu();
-        menu.Ekle("Ekip'i aç", PencereyiAc);
+        menu.Ekle($"{Tema.UygulamaAdi} uygulamasını aç", PencereyiAc);
         menu.Ayirici();
         menu.Ekle("Çıkış", () => { _gercektenKapat = true; Close(); }, Tema.Hata);
-        _tepsi = new NotifyIcon { Icon = Tema.Ikon, Text = "Ekip", Visible = true, ContextMenuStrip = menu };
+        _tepsi = new NotifyIcon { Icon = Tema.Ikon, Text = Tema.UygulamaAdi, Visible = true, ContextMenuStrip = menu };
         _tepsi.DoubleClick += (_, _) => PencereyiAc();
         _tepsi.BalloonTipClicked += (_, _) => PencereyiAc();
     }
@@ -430,7 +430,7 @@ public partial class AnaForm
         if (!_tepsiUyarisiGosterildi && _tepsi != null)
         {
             _tepsiUyarisiGosterildi = true;
-            _tepsi.ShowBalloonTip(4000, "Ekip arka planda çalışıyor",
+            _tepsi.ShowBalloonTip(4000, $"{Tema.UygulamaAdi} arka planda çalışıyor",
                 $"Oyundayken {_overlayTusu} ile overlay'i açabilirsin. Kapatmak için tepsideki simgeye sağ tıkla.", ToolTipIcon.None);
         }
     }

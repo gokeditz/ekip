@@ -114,7 +114,7 @@ public class HakkindaPaneli : Control
             TextRenderer.DrawText(g, metin, Tema.Yazi(9.5f), new Rectangle(x, y + Tema.S(38), w, Tema.S(40)), Tema.MetinIkincil, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
             y += Tema.S(78);
         }
-        Satir("Sürüm", "Ekip " + Guncelleyici.MevcutSurumYazisi);
+        Satir("Sürüm", Tema.UygulamaAdi + " " + Guncelleyici.MevcutSurumYazisi);
         Satir("Emoji", "Emoji: Twemoji © Twitter / jdecked, CC-BY 4.0");
     }
 }
@@ -142,7 +142,7 @@ public class KisayolPaneli : Panel
         DoubleBuffered = true;
         _satirlar =
         [
-            ("Overlay'i aç / kapat", "Oyundayken arkadaşlar, parti ve sohbetler tam ekran açılır. Sadece tam ekran bir oyun ya da Ekip öndeyken çalışır.", _overlay, _overlayVarsayilan),
+            ("Overlay'i aç / kapat", "Oyundayken arkadaşlar, parti ve sohbetler tam ekran açılır. Sadece tam ekran bir oyun ya da 31Hane öndeyken çalışır.", _overlay, _overlayVarsayilan),
             ("Mini sohbete yaz", "Oyuna sabitlediğin mini sohbette yazma modunu açar. Bu sırada oyun klavye ve fareyi almaz; mini sohbeti taşıyıp boyutlandırabilir, tekerlekle kaydırabilirsin. Enter gönderir, Esc oyuna döner.", _mini, _miniVarsayilan),
             ("Mini sohbetin yeri ve boyutu", "Mini sohbetin yerini ve boyutunu yazma modunda fareyle ayarlarsın, hatırlanır. Ekran dışında kaldıysa buradan sıfırla.", _miniSifirla, null),
         ];
